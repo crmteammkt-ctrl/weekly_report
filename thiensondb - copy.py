@@ -5,6 +5,7 @@ import streamlit as st
 from io import BytesIO
 from datetime import datetime
 import requests
+import os
 
 # -------------------------
 # Hàm xuất Excel
@@ -602,4 +603,5 @@ retention = pd.concat([retention, pd.DataFrame([grand])], ignore_index=True)
 
 st.subheader("🏅 Cohort Retention – Cộng dồn (%)")
 st.dataframe(retention)
+
 
