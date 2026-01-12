@@ -470,26 +470,28 @@ st.download_button(
 # =========================
 # KH MỚI VS KH QUAY LẠI
 # =========================
-@st.cache_data
-def first_purchase():
-    conn = sqlite3.connect(DB_PATH)
-    d = pd.read_sql("""
-        SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
-        FROM tinhhinhbanhang
-        GROUP BY Số_điện_thoại
-    """, conn)
-    conn.close()
-    d["First_Date"] = pd.to_datetime(d["First_Date"])
-    return d
 
+# lấy ngày mua đầu tiên (từ load_data.py)
 df_fp = first_purchase()
+
+# merge vào dữ liệu đã lọc
 df_kh = df_f.merge(df_fp, on="Số_điện_thoại", how="left")
-df_kh["KH_type"] = np.where(df_kh["First_Date"]>=pd.to_datetime(start_date),"KH mới","KH quay lại")
+
+# phân loại KH mới / quay lại (CHUẨN)
+df_kh["KH_type"] = np.where(
+    (df_kh["First_Date"] >= pd.to_datetime(start_date)) &
+    (df_kh["First_Date"] <= pd.to_datetime(end_date)),
+    "KH mới",
+    "KH quay lại"
+)
 
 st.subheader("👥 KH mới vs KH quay lại")
 st.dataframe(
-    df_kh.groupby("KH_type")["Số_điện_thoại"].nunique().reset_index(name="Số KH")
+    df_kh.groupby("KH_type")["Số_điện_thoại"]
+    .nunique()
+    .reset_index(name="Số KH")
 )
+
 
 # =========================
 # COHORT RETENTION – CỘNG DỒN (%)
@@ -556,5 +558,6 @@ retention = pd.concat([retention, pd.DataFrame([grand])], ignore_index=True)
 
 st.subheader("🏅 Cohort Retention – Cộng dồn (%)")
 st.dataframe(retention)
+
 
 
