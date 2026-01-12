@@ -51,22 +51,39 @@ def clean_filter(filter_values, col_values):
         return col_values
     return filter_values
 
+@st.cache_data(show_spinner=False)
+def apply_filters(
+    df,
+    start_date,
+    end_date,
+    loaiCT_filter,
+    brand_filter,
+    region_filter,
+    store_filter
+):
+    return df[
+        (df["Ngày"] >= start_date) &
+        (df["Ngày"] <= end_date) &
+        (df["LoaiCT"].isin(loaiCT_filter)) &
+        (df["Brand"].isin(brand_filter)) &
+        (df["Region"].isin(region_filter)) &
+        (df["Điểm_mua_hàng"].isin(store_filter))
+    ]
 loaiCT_filter = clean_filter(loaiCT_filter, df["LoaiCT"].unique())
-brand_filter = clean_filter(brand_filter, df["Brand"].unique())
+brand_filter  = clean_filter(brand_filter, df["Brand"].unique())
 region_filter = clean_filter(region_filter, df["Region"].unique())
-store_filter = clean_filter(store_filter, df["Điểm_mua_hàng"].unique())
+store_filter  = clean_filter(store_filter, df["Điểm_mua_hàng"].unique())
 
-# -------------------------
-# Lọc dữ liệu theo sidebar
-# -------------------------
-df_f = df[
-    (df["Ngày"] >= pd.to_datetime(start_date)) &
-    (df["Ngày"] <= pd.to_datetime(end_date)) &
-    (df["LoaiCT"].isin(loaiCT_filter)) &
-    (df["Brand"].isin(brand_filter)) &
-    (df["Region"].isin(region_filter)) &
-    (df["Điểm_mua_hàng"].isin(store_filter))
-]
+df_f = apply_filters(
+    df,
+    pd.to_datetime(start_date),
+    pd.to_datetime(end_date),
+    loaiCT_filter,
+    brand_filter,
+    region_filter,
+    store_filter
+)
+
 
 # -------------------------
 # Thêm cột thời gian theo phân tích
@@ -103,18 +120,28 @@ c5.metric("Khách hàng", customers)
 # Báo cáo theo Region + Time
 # -------------------------
 freq_map = {"Ngày":"D","Tuần":"W","Tháng":"M","Quý":"Q","Năm":"Y"}
-df_time = (
-    df_f
-    .set_index("Ngày")
-    .resample(freq_map[time_type])
-    .agg(
-        Gross=("Tổng_Gross","sum"),
-        Net=("Tổng_Net","sum"),
-        Orders=("Số_CT","nunique"),
-        Customers=("Số_điện_thoại","nunique")
+@st.cache_data(show_spinner=False)
+def group_time(df_f, time_type):
+    freq_map = {"Ngày":"D","Tuần":"W","Tháng":"M","Quý":"Q","Năm":"Y"}
+
+    d = (
+        df_f
+        .set_index("Ngày")
+        .resample(freq_map[time_type])
+        .agg(
+            Gross=("Tổng_Gross","sum"),
+            Net=("Tổng_Net","sum"),
+            Orders=("Số_CT","nunique"),
+            Customers=("Số_điện_thoại","nunique")
+        )
+        .reset_index()
     )
-    .reset_index()
-)
+
+    d["CK_%"] = (1 - d["Net"] / d["Gross"]) * 100
+    d["Net_prev"] = d["Net"].shift(1)
+    d["Growth_%"] = (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100
+    return d
+df_time = group_time(df_f, time_type)
 df_time["CK_%"] = (1 - df_time["Net"] / df_time["Gross"]) * 100
 df_time["Net_prev"] = df_time["Net"].shift(1)
 df_time["Growth_%"] = (df_time["Net"] - df_time["Net_prev"]) / df_time["Net_prev"] * 100
@@ -138,22 +165,29 @@ def revenue_group(col):
 # -------------------------
 # Region Time
 # -------------------------
-df_region_time = (
-    df_f_time
-    .groupby(["Time","Region"])
-    .agg(
-        Gross=("Tổng_Gross","sum"),
-        Net=("Tổng_Net","sum"),
-        Orders=("Số_CT","nunique"),
-        Customers=("Số_điện_thoại","nunique")
+@st.cache_data(show_spinner=False)
+def group_region_time(df_f_time):
+    d = (
+        df_f_time
+        .groupby(["Time","Region"])
+        .agg(
+            Gross=("Tổng_Gross","sum"),
+            Net=("Tổng_Net","sum"),
+            Orders=("Số_CT","nunique"),
+            Customers=("Số_điện_thoại","nunique")
+        )
+        .reset_index()
     )
-    .reset_index()
-)
-df_region_time["CK_%"] = np.where(
-    df_region_time["Gross"]>0,
-    (df_region_time["Gross"]-df_region_time["Net"])/df_region_time["Gross"]*100,0
-).round(2)
-df_region_time = df_region_time.sort_values(["Time","Net"], ascending=[True,False])
+
+    d["CK_%"] = np.where(
+        d["Gross"] > 0,
+        (d["Gross"] - d["Net"]) / d["Gross"] * 100,
+        0
+    ).round(2)
+
+    return d.sort_values(["Time","Net"], ascending=[True, False])
+df_region_time = group_region_time(df_f_time)
+
 
 st.subheader(f"🌍 Theo Region + {time_type}")
 st.dataframe(df_region_time)
@@ -197,18 +231,29 @@ elif time_type == "Năm":
     year_selected = st.selectbox("📅 Chọn năm", sorted(df_store["Year"].unique()))
     df_store = df_store[df_store["Year"]==year_selected]
 
-df_store_group = (
-    df_store.groupby("Điểm_mua_hàng")
-    .agg(
-        Gross=("Tổng_Gross","sum"),
-        Net=("Tổng_Net","sum"),
-        Orders=("Số_CT","nunique"),
-        Customers=("Số_điện_thoại","nunique")
+@st.cache_data(show_spinner=False)
+def group_store(df_store):
+    d = (
+        df_store
+        .groupby("Điểm_mua_hàng")
+        .agg(
+            Gross=("Tổng_Gross","sum"),
+            Net=("Tổng_Net","sum"),
+            Orders=("Số_CT","nunique"),
+            Customers=("Số_điện_thoại","nunique")
+        )
+        .reset_index()
     )
-    .reset_index()
-)
-df_store_group["CK_%"] = np.where(df_store_group["Gross"]>0,(df_store_group["Gross"]-df_store_group["Net"])/df_store_group["Gross"]*100,0).round(2)
-df_store_group = df_store_group.sort_values("Net",ascending=False)
+
+    d["CK_%"] = np.where(
+        d["Gross"] > 0,
+        (d["Gross"] - d["Net"]) / d["Gross"] * 100,
+        0
+    ).round(2)
+
+    return d.sort_values("Net", ascending=False)
+df_store_group = group_store(df_store)
+
 st.dataframe(df_store_group)
 
 # -------------------------
@@ -228,12 +273,21 @@ if nhom_sp_selected:
 if ten_sp_selected:
     df_product = df_product[df_product["Tên_hàng"].isin(ten_sp_selected)]
 
-df_product_group = df_product.groupby("Tên_hàng").agg(
-    Gross=("Tổng_Gross","sum"),
-    Net=("Tổng_Net","sum"),
-    Orders=("Số_CT","nunique"),
-    Customers=("Số_điện_thoại","nunique")
-).reset_index().sort_values("Net",ascending=False)
+@st.cache_data(show_spinner=False)
+def group_product(df):
+    return (
+        df.groupby("Tên_hàng")
+        .agg(
+            Gross=("Tổng_Gross","sum"),
+            Net=("Tổng_Net","sum"),
+            Orders=("Số_CT","nunique"),
+            Customers=("Số_điện_thoại","nunique")
+        )
+        .reset_index()
+        .sort_values("Net", ascending=False)
+    )
+df_product_group = group_product(df_product)
+
 
 st.dataframe(df_product_group)
 
@@ -272,21 +326,26 @@ group_cols = ["Số_điện_thoại"]
 if not GROUP_BY_CUSTOMER:
     group_cols.append("Điểm_mua_hàng")
 
-df_export = (
-    df_f
-    .groupby(group_cols)
-    .agg(
-        Name=("tên_KH","first"),
-        Name_Check=("Kiểm_tra_tên","first"),
-        Gross=("Tổng_Gross","sum"),
-        Net=("Tổng_Net","sum"),
-        Orders=("Số_CT","nunique"),
-        First_Order=("Ngày","min"),
-        Last_Order=("Ngày","max"),
-        Check_SDT=("Trạng_thái_số_điện_thoại","first")
+@st.cache_data(show_spinner="📦 Tổng hợp CRM...")
+def build_crm(df_f, group_cols):
+    d = (
+        df_f
+        .groupby(group_cols)
+        .agg(
+            Name=("tên_KH","first"),
+            Name_Check=("Kiểm_tra_tên","first"),
+            Gross=("Tổng_Gross","sum"),
+            Net=("Tổng_Net","sum"),
+            Orders=("Số_CT","nunique"),
+            First_Order=("Ngày","min"),
+            Last_Order=("Ngày","max"),
+            Check_SDT=("Trạng_thái_số_điện_thoại","first")
+        )
+        .reset_index()
     )
-    .reset_index()
-)
+    return d
+df_export = build_crm(df_f, group_cols)
+
 
 df_export["CK_%"] = np.where(
     df_export["Gross"]>0,
@@ -545,4 +604,5 @@ retention = pd.concat([retention, pd.DataFrame([grand])], ignore_index=True)
 
 st.subheader("🏅 Cohort Retention – Cộng dồn (%)")
 st.dataframe(retention)
+
 
