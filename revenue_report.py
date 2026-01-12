@@ -1,128 +1,53 @@
-import sqlite3
-import pandas as pd
-import numpy as np
 import streamlit as st
-from io import BytesIO
-from datetime import datetime
+import pandas as pd
+import plotly.express as px
 from load_data import load_data, first_purchase
 
-# -------------------------
-# Hàm xuất Excel
-# -------------------------
-def to_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Data")
-    return output.getvalue()
+st.set_page_config(page_title="Báo cáo Doanh thu", layout="wide")
+st.title("Báo cáo Doanh thu")
 
-# -------------------------
+# =====================
 # Load dữ liệu
-# -------------------------
+# =====================
 df = load_data()
-df_fp = first_purchase()
+df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
 
-st.set_page_config(page_title="Marketing Revenue Dashboard", layout="wide")
-st.title("📊 MARKETING REVENUE DASHBOARD")
+# =====================
+# Sidebar: bộ lọc
+# =====================
+st.sidebar.header("Bộ lọc dữ liệu")
+analysis_type = st.sidebar.selectbox("Chọn kiểu phân tích", ["Ngày", "Tuần", "Tháng", "Khoảng thời gian"])
 
-# -------------------------
-# Sidebar bộ lọc chung
-# -------------------------
-with st.sidebar:
-    st.header("🎛️ Bộ lọc dữ liệu")
-    time_type = st.selectbox("Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"])
-    start_date = st.date_input("Từ ngày", df["Ngày"].min())
-    end_date   = st.date_input("Đến ngày", df["Ngày"].max())
-    loaiCT_filter = st.multiselect("Loại CT", ["All"] + sorted(df["LoaiCT"].dropna().unique()))
-    brand_filter = st.multiselect("Brand", ["All"] + sorted(df["Brand"].dropna().unique()))
-    region_filter = st.multiselect("Region", ["All"] + sorted(df["Region"].dropna().unique()))
-    store_filter  = st.multiselect("Cửa hàng", ["All"] + sorted(df["Điểm_mua_hàng"].dropna().unique()))
+start_date = st.sidebar.date_input("Từ ngày", df["Ngày"].min())
+end_date = st.sidebar.date_input("Đến ngày", df["Ngày"].max())
 
-# -------------------------
-# Chuẩn hóa bộ lọc "All"
-# -------------------------
-def clean_filter(filter_values, col_values):
-    if not filter_values or "All" in filter_values:
-        return col_values
-    return filter_values
+brands  = sorted(df["Brand"].dropna().unique())
+regions = sorted(df["Region"].dropna().unique())
+stores  = sorted(df["Điểm_mua_hàng"].dropna().unique())
+loaicts = sorted(df["LoaiCT"].dropna().unique()) 
 
-loaiCT_filter = clean_filter(loaiCT_filter, df["LoaiCT"].unique())
-brand_filter = clean_filter(brand_filter, df["Brand"].unique())
-region_filter = clean_filter(region_filter, df["Region"].unique())
-store_filter = clean_filter(store_filter, df["Điểm_mua_hàng"].unique())
+brand_filter  = st.sidebar.multiselect("Chọn Brand", ["Tất cả"] + brands, default=["Tất cả"])
+region_filter = st.sidebar.multiselect("Chọn Region", ["Tất cả"] + regions, default=["Tất cả"])
+store_filter  = st.sidebar.multiselect("Chọn Điểm mua hàng", ["Tất cả"] + stores, default=["Tất cả"])
+loaiCT_filter = st.sidebar.multiselect("Chọn Loại CT", ["Tất cả"] + loaicts, default=["Tất cả"])
 
-# -------------------------
-# Lọc dữ liệu theo sidebar
-# -------------------------
-df_f = df[
-    (df["Ngày"] >= pd.to_datetime(start_date)) &
-    (df["Ngày"] <= pd.to_datetime(end_date)) &
-    (df["LoaiCT"].isin(loaiCT_filter)) &
-    (df["Brand"].isin(brand_filter)) &
-    (df["Region"].isin(region_filter)) &
-    (df["Điểm_mua_hàng"].isin(store_filter))
-]
+# =====================
+# Xử lý "Tất cả"
+# =====================
+if "Tất cả" in brand_filter: brand_filter = brands
+if "Tất cả" in region_filter: region_filter = regions
+if "Tất cả" in store_filter: store_filter = stores
+if "Tất cả" in loaiCT_filter: loaiCT_filter = loaicts
 
-# -------------------------
-# Thêm cột thời gian theo phân tích
-# -------------------------
-df_f_time = df_f.copy()
-if time_type == "Ngày": df_f_time["Time"] = df_f_time["Ngày"].dt.date
-elif time_type == "Tuần": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("W").astype(str)
-elif time_type == "Tháng": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
-elif time_type == "Quý": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
-elif time_type == "Năm": df_f_time["Time"] = df_f_time["Ngày"].dt.year
+# =====================
+# Lọc dữ liệu
+# =====================
+mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
+mask &= df["Brand"].isin(brand_filter)
+mask &= df["Region"].isin(region_filter)
+mask &= df["Điểm_mua_hàng"].isin(store_filter)
+mask &= df["LoaiCT"].isin(loaiCT_filter)
+df_filtered = df[mask]
 
-# -------------------------
-# KPI tổng quan
-# -------------------------
-gross = df_f["Tổng_Gross"].sum()
-net = df_f["Tổng_Net"].sum()
-orders = df_f["Số_CT"].nunique()
-customers = df_f["Số_điện_thoại"].nunique()
-ck_rate = (1 - net / gross) * 100 if gross > 0 else 0
-
-c1,c2,c3,c4,c5 = st.columns(5)
-c1.metric("Gross", f"{gross:,.0f}")
-c2.metric("Net", f"{net:,.0f}")
-c3.metric("CK %", f"{ck_rate:.2f}%")
-c4.metric("Đơn hàng", orders)
-c5.metric("Khách hàng", customers)
-
-# -------------------------
-# Báo cáo theo Region + Time
-# -------------------------
-freq_map = {"Ngày":"D","Tuần":"W","Tháng":"M","Quý":"Q","Năm":"Y"}
-df_time = (
-    df_f
-    .set_index("Ngày")
-    .resample(freq_map[time_type])
-    .agg(
-        Gross=("Tổng_Gross","sum"),
-        Net=("Tổng_Net","sum"),
-        Orders=("Số_CT","nunique"),
-        Customers=("Số_điện_thoại","nunique")
-    )
-    .reset_index()
-)
-df_time["CK_%"] = (1 - df_time["Net"] / df_time["Gross"]) * 100
-df_time["Net_prev"] = df_time["Net"].shift(1)
-df_time["Growth_%"] = (df_time["Net"] - df_time["Net_prev"]) / df_time["Net_prev"] * 100
-
-# -------------------------
-# Revenue nhóm theo cột
-# -------------------------
-def revenue_group(col):
-    return (
-        df_f.groupby(col)
-        .agg(
-            Gross=("Tổng_Gross","sum"),
-            Net=("Tổng_Net","sum"),
-            Orders=("Số_CT","nunique"),
-            Customers=("Số_điện_thoại","nunique")
-        )
-        .reset_index()
-        .sort_values("Net", ascending=False)
-    )
-
-# Các báo cáo khác: Store, Product, CRM, Pareto, KH mới/quay lại, Cohort
-# (giữ nguyên logic từ code bạn đã gửi, chỉ chỉnh sửa nhỏ xử lý NaT, chuyển đổi thời gian, và Streamlit caching)
+st.subheader("📑 Dữ liệu đã lọc")
+st.dataframe(df_filtered)
