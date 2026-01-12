@@ -1,49 +1,30 @@
-# load_data.py
 import sqlite3
 import pandas as pd
 import os
-import requests
+import gdown
 import streamlit as st
 
-# -------------------------
-# Cấu hình file DB
-# -------------------------
-GOOGLE_DRIVE_FILE_ID = '1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH'
+GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
 DB_PATH = "thiensondb.db"
 
-# -------------------------
-# Tải file từ Google Drive (nếu chưa có)
-# -------------------------
-@st.cache_resource
-def download_database():
+@st.cache_resource(show_spinner="⬇️ Downloading database (~500MB)...")
+def get_connection():
     if not os.path.exists(DB_PATH):
-        with st.spinner('Đang tải dữ liệu từ Google Drive (500MB)... Vui lòng đợi trong giây lát.'):
-            session = requests.Session()
-            url = "https://docs.google.com/uc?export=download"
-            response = session.get(url, params={'id': GOOGLE_DRIVE_FILE_ID}, stream=True)
+        url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
+        gdown.download(url, DB_PATH, quiet=False)
 
-            token = None
-            for key, value in response.cookies.items():
-                if key.startswith('download_warning'):
-                    token = value
-                    break
-
-            if token:
-                response = session.get(url, params={'id': GOOGLE_DRIVE_FILE_ID, 'confirm': token}, stream=True)
-
-            with open(DB_PATH, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=32768):
-                    if chunk:
-                        f.write(chunk)
+    # ⚠️ verify DB header (chống file html)
+    with open(DB_PATH, "rb") as f:
+        header = f.read(16)
+        if header != b"SQLite format 3\x00":
+            raise ValueError("Downloaded file is NOT a valid SQLite database")
 
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
-# -------------------------
-# Load dữ liệu chính
-# -------------------------
-@st.cache_data
+
+@st.cache_data(show_spinner="📦 Loading data...")
 def load_data():
-    conn = download_database()
+    conn = get_connection()
     df = pd.read_sql("""
         SELECT
             Ngày,
@@ -63,20 +44,17 @@ def load_data():
             Tổng_Net
         FROM tinhhinhbanhang
     """, conn)
-    
-    df["Ngày"] = pd.to_datetime(df["Ngày"])
+    df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
     return df
 
-# -------------------------
-# Lấy ngày mua đầu tiên của mỗi khách
-# -------------------------
-@st.cache_data
-def first_purchase():
-    df = load_data()
-    df_fp = (
-        df.groupby("Số_điện_thoại")["Ngày"]
-        .min()
-        .reset_index(name="First_Date")
-    )
-    return df_fp
 
+@st.cache_data(show_spinner="📅 Calculating first purchase...")
+def first_purchase():
+    conn = get_connection()
+    df_fp = pd.read_sql("""
+        SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
+        FROM tinhhinhbanhang
+        GROUP BY Số_điện_thoại
+    """, conn)
+    df_fp["First_Date"] = pd.to_datetime(df_fp["First_Date"], errors="coerce")
+    return df_fp
