@@ -4,3 +4,4 @@ streamlit
 plotly
 openpyxl
 requests
+gdown
