@@ -63,7 +63,7 @@ def load_data():
             Tổng_Net
         FROM tinhhinhbanhang
     """, conn)
-    conn.close()
+    
     df["Ngày"] = pd.to_datetime(df["Ngày"])
     return df
 
@@ -72,13 +72,11 @@ def load_data():
 # -------------------------
 @st.cache_data
 def first_purchase():
-    conn = sqlite3.connect(DB_PATH)
-    df_fp = pd.read_sql("""
-        SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
-        FROM tinhhinhbanhang
-        GROUP BY Số_điện_thoại
-    """, conn)
-    conn.close()
-    df_fp["First_Date"] = pd.to_datetime(df_fp["First_Date"])
+    df = load_data()
+    df_fp = (
+        df.groupby("Số_điện_thoại")["Ngày"]
+        .min()
+        .reset_index(name="First_Date")
+    )
     return df_fp
 
