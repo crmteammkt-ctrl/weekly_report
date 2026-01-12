@@ -32,12 +32,12 @@ def clean_filter(values, all_values):
 
 
 # ==================================================
-# LOAD DATA (CACHED)
+# LOAD DATA
 # ==================================================
 df = load_data()
 df_fp = first_purchase()
 
-# Fix NaT
+# Fix NaT & datetime
 df = df.dropna(subset=["Ngày"])
 df["Ngày"] = pd.to_datetime(df["Ngày"])
 
@@ -77,7 +77,6 @@ with st.sidebar:
         "Cửa hàng",
         ["All"] + sorted(df["Điểm_mua_hàng"].dropna().unique())
     )
-
 
 # ==================================================
 # APPLY FILTERS
@@ -133,8 +132,13 @@ df_time = (
     .reset_index()
 )
 
-df_time["CK_%"] = (1 - df_time["Net"] / df_time["Gross"]) * 100
-df_time["Growth_%"] = df_time["Net"].pct_change() * 100
+df_time["CK_%"] = np.where(
+    df_time["Gross"] > 0,
+    (1 - df_time["Net"] / df_time["Gross"]) * 100,
+    0
+).round(2)
+
+df_time["Growth_%"] = df_time["Net"].pct_change().mul(100).round(2)
 
 st.subheader("📈 Doanh thu theo thời gian")
 st.dataframe(df_time, use_container_width=True)
@@ -152,6 +156,7 @@ st.divider()
 # ==================================================
 @st.cache_data
 def revenue_group(df, col):
+    df = df.copy()
     return (
         df.groupby(col, dropna=False)
         .agg(
@@ -168,18 +173,16 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("🏷️ Theo Brand")
-    df_brand = revenue_group(df_f, "Brand")
-    st.dataframe(df_brand, use_container_width=True)
+    st.dataframe(revenue_group(df_f, "Brand"), use_container_width=True)
 
 with col2:
     st.subheader("📍 Theo Region")
-    df_region = revenue_group(df_f, "Region")
-    st.dataframe(df_region, use_container_width=True)
+    st.dataframe(revenue_group(df_f, "Region"), use_container_width=True)
 
 st.divider()
 
 # ==================================================
-# FIRST PURCHASE / NEW vs RETURNING
+# CUSTOMER NEW vs RETURNING (LOGIC ĐÚNG)
 # ==================================================
 df_merge = df_f.merge(
     df_fp,
@@ -188,11 +191,13 @@ df_merge = df_f.merge(
 )
 
 df_merge["Customer_Type"] = np.where(
-    df_merge["Ngày"] == df_merge["First_Date"],
+    df_merge["First_Date"] >= pd.to_datetime(start_date),
     "Khách mới",
     "Khách quay lại"
 )
 
 st.subheader("👥 Khách mới vs Khách quay lại")
-df_customer_type = revenue_group(df_merge, "Customer_Type")
-st.dataframe(df_customer_type, use_container_width=True)
+st.dataframe(
+    revenue_group(df_merge, "Customer_Type"),
+    use_container_width=True
+)
