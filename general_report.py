@@ -4,8 +4,7 @@ import numpy as np
 import streamlit as st
 from io import BytesIO
 from datetime import datetime
-import requests
-import os
+from load_data import load_data, first_purchase  # <-- import từ load_data.py
 
 # -------------------------
 # Hàm xuất Excel
@@ -17,60 +16,13 @@ def to_excel(df):
     return output.getvalue()
 
 # -------------------------
-# Cấu hình Streamlit
+# Load dữ liệu
 # -------------------------
-# https://drive.google.com/file/d/1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH/view?usp=sharing
-# 1. ID file Google Drive bạn đã lấy ở bước trước
-# Ví dụ: link là https://drive.google.com/file/d/1abc123.../view -> ID là 1abc123...
-GOOGLE_DRIVE_FILE_ID = '1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH'
-DB_PATH = "thiensondb.db" # Chỉ để tên file, không để ổ đĩa D:/
-
-@st.cache_resource
-def download_database():
-    """Hàm này giúp tải file từ Google Drive về server Streamlit"""
-    if not os.path.exists(DB_PATH):
-        with st.spinner('Đang tải dữ liệu từ Google Drive (500MB)... Vui lòng đợi trong giây lát.'):
-            url = f'https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}'
-            response = requests.get(url, stream=True)
-            with open(DB_PATH, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+df = load_data()          # <-- load dữ liệu chính
+df_fp = first_purchase()  # <-- load ngày mua đầu tiên của khách
 
 st.set_page_config(page_title="Marketing Revenue Dashboard", layout="wide")
 st.title("📊 MARKETING REVENUE DASHBOARD")
-
-# -------------------------
-# Load dữ liệu
-# -------------------------
-@st.cache_data
-def load_data():
-    conn = download_database()
-    df = pd.read_sql("""
-        SELECT
-            Ngày,
-            LoaiCT,
-            Brand,
-            Region,
-            Tỉnh_TP,
-            Điểm_mua_hàng,
-            Nhóm_hàng,
-            Tên_hàng,
-            Số_CT,
-            tên_KH,
-            Kiểm_tra_tên,
-            Số_điện_thoại,
-            Trạng_thái_số_điện_thoại,
-            Tổng_Gross,
-            Tổng_Net
-        FROM tinhhinhbanhang
-    """, conn)
-    conn.close()
-    df["Ngày"] = pd.to_datetime(df["Ngày"])
-    return df
-
-df = load_data()
 
 # -------------------------
 # Sidebar bộ lọc chung
@@ -115,6 +67,7 @@ df_f = df[
     (df["Region"].isin(region_filter)) &
     (df["Điểm_mua_hàng"].isin(store_filter))
 ]
+
 
 # -------------------------
 # Thêm cột thời gian theo phân tích
