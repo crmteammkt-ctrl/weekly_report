@@ -1,30 +1,40 @@
-import sqlite3
+import os
+import duckdb
 import pandas as pd
 import streamlit as st
-import os
-import gdown
 
-GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
-DB_PATH = "thiensondb.db"
+# =========================
+# CONFIG
+# =========================
+DUCKDB_DB = "marketing.duckdb"
+TABLE_NAME = "tinhhinhbanhang"
 
-# ==================================================
-# DB CONNECTION (KHÔNG BAO GIỜ CLOSE)
-# ==================================================
-@st.cache_resource(show_spinner="⬇️ Downloading database (~500MB)...")
+
+# =========================
+# GET CONNECTION (DUCKDB)
+# =========================
+@st.cache_resource(show_spinner="🦆 Opening DuckDB...")
 def get_connection():
-    if not os.path.exists(DB_PATH):
-        url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
-        gdown.download(url, DB_PATH, quiet=False)
+    if not os.path.exists(DUCKDB_DB):
+        st.error(
+            "❌ Không tìm thấy file DuckDB "
+            f"'{DUCKDB_DB}'. Hãy chạy `python convert_sqlite_duckdb.py` "
+            "trong terminal để tạo file trước."
+        )
+        st.stop()
 
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    # read_only cho an toàn
+    return duckdb.connect(DUCKDB_DB, read_only=True)
 
-# ==================================================
+
+# =========================
 # LOAD MAIN DATA
-# ==================================================
+# =========================
 @st.cache_data(show_spinner="📦 Loading data...")
 def load_data():
-    conn = get_connection()
-    df = pd.read_sql("""
+    con = get_connection()
+
+    df = con.execute(f"""
         SELECT
             Ngày,
             LoaiCT,
@@ -41,29 +51,36 @@ def load_data():
             Trạng_thái_số_điện_thoại,
             Tổng_Gross,
             Tổng_Net
-        FROM tinhhinhbanhang
-    """, conn)
+        FROM {TABLE_NAME}
+    """).df()
 
+    # Chuẩn hoá kiểu dữ liệu
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
-    # Ép kiểu số an toàn (QUAN TRỌNG)
+
     num_cols = ["Tổng_Gross", "Tổng_Net"]
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # Bỏ dòng không có ngày để tránh lỗi
+    df = df.dropna(subset=["Ngày"])
+
     return df
 
-# ==================================================
+
+# =========================
 # FIRST PURCHASE
-# ==================================================
+# =========================
 @st.cache_data(show_spinner="📅 Calculating first purchase...")
 def first_purchase():
-    conn = get_connection()
-    df = pd.read_sql("""
+    con = get_connection()
+
+    df = con.execute(f"""
         SELECT
             Số_điện_thoại,
             MIN(Ngày) AS First_Date
-        FROM tinhhinhbanhang
+        FROM {TABLE_NAME}
         GROUP BY Số_điện_thoại
-    """, conn)
+    """).df()
 
     df["First_Date"] = pd.to_datetime(df["First_Date"], errors="coerce")
     return df
