@@ -28,6 +28,16 @@ df = load_data()
 # Sidebar bộ lọc chung
 # -------------------------
 with st.sidebar:
+    st.markdown("---")
+    if st.button("🔄 Cập nhật dữ liệu từ Google Drive"):
+        # Tải DB mới + convert lại DuckDB
+        rebuild_duckdb_from_drive()
+
+        # Xoá cache để lần sau đọc lại dữ liệu mới
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
+        st.success("✅ Đã cập nhật dữ liệu mới. App sẽ dùng data mới ở lần load tiếp theo.")
     st.header("🎛️ Bộ lọc dữ liệu")
 
     time_type = st.selectbox(

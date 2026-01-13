@@ -5,9 +5,6 @@ import pandas as pd
 import streamlit as st
 import gdown
 
-# =========================
-# CONFIG
-# =========================
 GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
 SQLITE_DB = "thiensondb.db"
 DUCKDB_DB = "marketing.duckdb"
@@ -15,22 +12,16 @@ TABLE_NAME = "tinhhinhbanhang"
 
 
 # =========================
-# ĐẢM BẢO CÓ FILE DUCKDB
-# (chưa có thì tự tải SQLite + convert)
+# HÀM REBUILD DUCKDB TỪ GOOGLE DRIVE
+# (CHỈ GỌI KHI BẠN MUỐN CẬP NHẬT)
 # =========================
-def ensure_duckdb_exists():
-    if os.path.exists(DUCKDB_DB):
-        # Đã có rồi thì thôi
-        return
+def rebuild_duckdb_from_drive():
+    """Tải SQLite từ Drive và convert sang DuckDB."""
+    with st.spinner("⬇️ Đang tải database mới từ Google Drive (~500MB)..."):
+        url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
+        gdown.download(url, SQLITE_DB, quiet=False)
 
-    # 1. Đảm bảo có file SQLite
-    if not os.path.exists(SQLITE_DB):
-        with st.spinner("⬇️ Đang tải database từ Google Drive (~500MB)..."):
-            url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
-            gdown.download(url, SQLITE_DB, quiet=False)
-
-    # 2. Convert SQLite -> DuckDB (chạy 1 lần)
-    with st.spinner("🦆 Đang convert SQLite → DuckDB (chạy 1 lần)..."):
+    with st.spinner("🦆 Đang convert SQLite → DuckDB..."):
         sqlite_conn = sqlite3.connect(SQLITE_DB)
         df = pd.read_sql(f"SELECT * FROM {TABLE_NAME}", sqlite_conn)
         sqlite_conn.close()
@@ -41,6 +32,19 @@ def ensure_duckdb_exists():
             SELECT * FROM df
         """)
         duck.close()
+
+
+# =========================
+# GET CONNECTION (DUCKDB)
+# =========================
+@st.cache_resource(show_spinner="🦆 Opening DuckDB...")
+def get_connection():
+    # Lần đầu mà chưa có DuckDB thì tự tạo
+    if not os.path.exists(DUCKDB_DB):
+        rebuild_duckdb_from_drive()
+
+    return duckdb.connect(DUCKDB_DB, read_only=True)
+
 
 
 # =========================
