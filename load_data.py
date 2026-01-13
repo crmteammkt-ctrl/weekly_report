@@ -12,12 +12,10 @@ TABLE_NAME = "tinhhinhbanhang"
 
 
 # =========================
-# HÀM REBUILD DUCKDB TỪ GOOGLE DRIVE
-# (CHỈ GỌI KHI BẠN MUỐN CẬP NHẬT)
+# HÀM TẢI + CONVERT DB
 # =========================
 def rebuild_duckdb_from_drive():
-    """Tải SQLite từ Drive và convert sang DuckDB."""
-    with st.spinner("⬇️ Đang tải database mới từ Google Drive (~500MB)..."):
+    with st.spinner("⬇️ Đang tải DB từ Google Drive (~500MB)..."):
         url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
         gdown.download(url, SQLITE_DB, quiet=False)
 
@@ -35,25 +33,14 @@ def rebuild_duckdb_from_drive():
 
 
 # =========================
-# GET CONNECTION (DUCKDB)
+# GET CONNECTION
 # =========================
 @st.cache_resource(show_spinner="🦆 Opening DuckDB...")
 def get_connection():
-    # Lần đầu mà chưa có DuckDB thì tự tạo
+    # lần đầu chưa có DuckDB → build
     if not os.path.exists(DUCKDB_DB):
         rebuild_duckdb_from_drive()
 
-    return duckdb.connect(DUCKDB_DB, read_only=True)
-
-
-
-# =========================
-# GET CONNECTION (DUCKDB)
-# =========================
-@st.cache_resource(show_spinner="🦆 Opening DuckDB...")
-def get_connection():
-    ensure_duckdb_exists()
-    # read_only cho an toàn
     return duckdb.connect(DUCKDB_DB, read_only=True)
 
 
@@ -63,7 +50,6 @@ def get_connection():
 @st.cache_data(show_spinner="📦 Loading data...")
 def load_data():
     con = get_connection()
-
     df = con.execute(f"""
         SELECT
             Ngày,
@@ -85,12 +71,11 @@ def load_data():
     """).df()
 
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+    df = df.dropna(subset=["Ngày"])
 
-    num_cols = ["Tổng_Gross", "Tổng_Net"]
-    for c in num_cols:
+    for c in ["Tổng_Gross", "Tổng_Net"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    df = df.dropna(subset=["Ngày"])
     return df
 
 
@@ -100,11 +85,8 @@ def load_data():
 @st.cache_data(show_spinner="📅 Calculating first purchase...")
 def first_purchase():
     con = get_connection()
-
     df = con.execute(f"""
-        SELECT
-            Số_điện_thoại,
-            MIN(Ngày) AS First_Date
+        SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
         FROM {TABLE_NAME}
         GROUP BY Số_điện_thoại
     """).df()

@@ -28,16 +28,13 @@ df = load_data()
 # Sidebar bộ lọc chung
 # -------------------------
 with st.sidebar:
-    st.markdown("---")
-    if st.button("🔄 Cập nhật dữ liệu từ Google Drive"):
-        # Tải DB mới + convert lại DuckDB
+    if st.button("🔄 Cập nhật dữ liệu"):
         rebuild_duckdb_from_drive()
-
-        # Xoá cache để lần sau đọc lại dữ liệu mới
         st.cache_data.clear()
         st.cache_resource.clear()
+        st.success("Đã cập nhật DB mới — đang load lại dữ liệu…")
+        st.experimental_rerun()
 
-        st.success("✅ Đã cập nhật dữ liệu mới. App sẽ dùng data mới ở lần load tiếp theo.")
     st.header("🎛️ Bộ lọc dữ liệu")
 
     time_type = st.selectbox(
@@ -129,7 +126,6 @@ c5.metric("Khách hàng", customers)
 # -------------------------
 # Báo cáo theo Region + Time
 # -------------------------
-freq_map = {"Ngày":"D","Tuần":"W","Tháng":"M","Quý":"Q","Năm":"Y"}
 @st.cache_data(show_spinner=False)
 def group_time(df_f, time_type):
     freq_map = {"Ngày":"D","Tuần":"W","Tháng":"M","Quý":"Q","Năm":"Y"}
@@ -147,14 +143,24 @@ def group_time(df_f, time_type):
         .reset_index()
     )
 
-    d["CK_%"] = (1 - d["Net"] / d["Gross"]) * 100
+    d["CK_%"] = np.where(
+    d["Gross"] > 0,
+    (1 - d["Net"] / d["Gross"]) * 100,
+    0
+    ).round(2)
+
     d["Net_prev"] = d["Net"].shift(1)
-    d["Growth_%"] = (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100
+
+    d["Growth_%"] = np.where(
+    d["Net_prev"] > 0,
+    (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100,
+    0
+     ).round(2)
+    
     return d
+
 df_time = group_time(df_f, time_type)
-df_time["CK_%"] = (1 - df_time["Net"] / df_time["Gross"]) * 100
-df_time["Net_prev"] = df_time["Net"].shift(1)
-df_time["Growth_%"] = (df_time["Net"] - df_time["Net_prev"]) / df_time["Net_prev"] * 100
+
 
 # -------------------------
 # Hàm nhóm theo cột
