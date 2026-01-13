@@ -4,7 +4,7 @@ import streamlit as st
 from io import BytesIO
 from datetime import datetime
 
-from load_data import load_data, first_purchase
+from load_data import load_data, first_purchase, rebuild_duckdb_from_drive
 
 # -------------------------
 # Hàm xuất Excel
