@@ -45,6 +45,10 @@ def load_data():
     """, conn)
 
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+    # Ép kiểu số an toàn (QUAN TRỌNG)
+    num_cols = ["Tổng_Gross", "Tổng_Net"]
+    for c in num_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 # ==================================================
