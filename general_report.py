@@ -42,7 +42,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.cache_resource.clear()
         st.success("Đã cập nhật DB mới — đang load lại dữ liệu…")
-        st.experimental_rerun()
+        st.rerun()
 
     st.header("🎛️ Bộ lọc dữ liệu")
 
