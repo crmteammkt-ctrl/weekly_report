@@ -4,7 +4,7 @@ import streamlit as st
 from io import BytesIO
 from datetime import datetime
 
-from load_data import load_data, first_purchase, rebuild_duckdb_from_drive
+from load_data import load_data, first_purchase, rebuild_duckdb_from_drive, close_connection
 
 # =====================================================
 # Utils
@@ -37,6 +37,7 @@ df = load_data()
 # =====================================================
 with st.sidebar:
     if st.button("🔄 Cập nhật dữ liệu"):
+        close_connection()
         rebuild_duckdb_from_drive()
         st.cache_data.clear()
         st.cache_resource.clear()
