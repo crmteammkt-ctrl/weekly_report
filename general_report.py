@@ -464,51 +464,32 @@ if store_filter_pareto:
 
 def pareto_customer_by_store(df, percent=20, top=True):
     rows = []
-
     for store, d in df.groupby("Điểm_mua_hàng"):
-        g = (
-            d.groupby("Số_điện_thoại")
-            .agg(
-                Gross=("Tổng_Gross", "sum"),
-                Net=("Tổng_Net", "sum"),
-                Orders=("Số_CT", "nunique"),
-            )
-            .reset_index()
-            .sort_values("Net", ascending=False)
-        )
+        g = d.groupby("Số_điện_thoại").agg(
+            Gross=("Tổng_Gross","sum"),
+            Net=("Tổng_Net","sum"),
+            Orders=("Số_CT","nunique")
+        ).reset_index().sort_values("Net", ascending=False)
 
         if g.empty:
             continue
 
-        # Tính các chỉ số
         g["CK_%"] = ((g["Gross"] - g["Net"]) / g["Gross"] * 100).round(2)
         total_net = g["Net"].sum()
         g["Contribution_%"] = (g["Net"] / total_net * 100).round(2)
         g["Cum_%"] = g["Contribution_%"].cumsum().round(2)
 
-        # Lấy top/bottom % KH – nhớ .copy() để tránh SettingWithCopyWarning
         n = max(1, int(len(g) * percent / 100))
-        g_sel = (g.head(n) if top else g.tail(n)).copy()
-        g_sel["Điểm_mua_hàng"] = store
+        g_sel = g.head(n) if top else g.tail(n)
+
+        # tránh SettingWithCopyWarning
+        g_sel = g_sel.copy()
+        g_sel.loc[:, "Điểm_mua_hàng"] = store
 
         rows.append(g_sel)
 
-    if not rows:
-        # Không có dữ liệu thì trả về DataFrame rỗng cho an toàn
-        return pd.DataFrame(
-            columns=[
-                "Điểm_mua_hàng",
-                "Số_điện_thoại",
-                "Gross",
-                "Net",
-                "CK_%",
-                "Orders",
-                "Contribution_%",
-                "Cum_%",
-            ]
-        )
-
     return pd.concat(rows, ignore_index=True)
+
 
 
 df_pareto = pareto_customer_by_store(
