@@ -1,66 +1,53 @@
 import os
-import sqlite3
+import sqlite3   # vẫn được giữ, nhưng thực ra không còn dùng nhiều
 import duckdb
 import pandas as pd
 import numpy as np
 import streamlit as st
 import gdown
 
-# =========================
-# CẤU HÌNH
-# =========================
 GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
-SQLITE_DB = "thiensondb.db"      # file tải từ Drive về
-DUCKDB_DB = "marketing.duckdb"   # file DuckDB dùng cho báo cáo
-TABLE_NAME = "tinhhinhbanhang"   # tên bảng trong DB
+SQLITE_DB = "thiensondb.db"
+DUCKDB_DB = "marketing.duckdb"
+TABLE_NAME = "tinhhinhbanhang"
 
 
 # =========================
-# HÀM TẢI + CONVERT DB
+# HÀM TẢI + CONVERT DB (NEW)
 # =========================
 def rebuild_duckdb_from_drive():
     """
-    Download SQLite từ Google Drive (~500MB) và convert sang DuckDB.
-    Gọi lại nhiều lần cũng không sao (dùng cho nút 'Cập nhật dữ liệu').
+    Download SQLite từ Drive và convert sang DuckDB mà KHÔNG dùng pandas,
+    để tránh tốn RAM trên Streamlit Cloud.
     """
-    # 1. Tải SQLite từ Google Drive
+    # 1. Tải SQLite
     with st.spinner("⬇️ Đang tải DB từ Google Drive (~500MB)..."):
         url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
 
-        # Nếu đã có file cũ thì xóa để đảm bảo không lỗi
         if os.path.exists(SQLITE_DB):
             os.remove(SQLITE_DB)
 
-        # Tải về
         gdown.download(url, SQLITE_DB, quiet=False)
 
-    # 2. Đọc từ SQLite và ghi sang DuckDB
+    # 2. Convert SQLite -> DuckDB bằng ATTACH, không qua pandas
     with st.spinner("🦆 Đang convert SQLite → DuckDB..."):
-        # Đọc SQLite
-        sqlite_conn = sqlite3.connect(SQLITE_DB)
-        df = pd.read_sql(f"SELECT * FROM {TABLE_NAME}", sqlite_conn)
-        sqlite_conn.close()
+        # nếu có file DuckDB cũ thì xóa
+        if os.path.exists(DUCKDB_DB):
+            os.remove(DUCKDB_DB)
 
-        # Làm sạch các cột số / % có thể bị để dạng text
-        numeric_cols = ["Tổng_Gross", "Tổng_Net", "CK_%"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .str.replace("%", "", regex=False)
-                    .str.replace(",", "", regex=False)
-                    .replace("", np.nan)
-                )
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+        duck = duckdb.connect(DUCKDB_DB)
 
-        # Ghi sang DuckDB
-        duck = duckdb.connect(DUCKDB_DB)  # KHÔNG dùng read_only
+        # ATTACH SQLite DB vào DuckDB
+        duck.execute(f"ATTACH '{SQLITE_DB}' AS sqlite_db (TYPE sqlite)")
+
+        # Tạo bảng trong DuckDB từ bảng SQLite
         duck.execute(f"""
-            CREATE OR REPLACE TABLE {TABLE_NAME} AS
-            SELECT * FROM df
+            CREATE TABLE {TABLE_NAME} AS
+            SELECT * FROM sqlite_db.{TABLE_NAME};
         """)
+
         duck.close()
+
 
 
 # =========================
