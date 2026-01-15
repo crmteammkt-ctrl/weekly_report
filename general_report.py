@@ -426,20 +426,28 @@ for col in df_export.columns:
         # các cột số tổng hợp bằng SUM
         total_row[col] = df_export[col].sum()
     elif col == "CK_%":
-        # với % chiết khấu: lấy trung bình (hoặc bạn thích thì để 0 hay np.nan đều được)
+        # % chiết khấu: lấy trung bình (hoặc 0, tùy bạn)
         total_row[col] = df_export[col].mean()
+    elif col == "Last_Order":
+        # cột ngày: để NaT cho đúng kiểu datetime
+        total_row[col] = pd.NaT
     elif col == "Số_điện_thoại":
         total_row[col] = "TỔNG"
     else:
+        # các cột text khác có thể để rỗng
         total_row[col] = ""
 
-df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
+df_export_with_total = pd.concat(
+    [df_export, pd.DataFrame([total_row])],
+    ignore_index=True
+)
 
 # Chỉ hiển thị các cột cần thiết
 df_export_display = df_export_with_total[display_cols]
 
-# Streamlit mới khuyến nghị dùng width thay cho use_container_width
+# Streamlit 1.53 khuyến nghị dùng width thay use_container_width
 st.dataframe(df_export_display, width="stretch")
+
 
 
 # Xuất Excel
