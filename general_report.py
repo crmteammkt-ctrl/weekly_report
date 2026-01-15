@@ -422,17 +422,25 @@ st.info(f"👥 Tổng số KH theo bộ lọc hiện tại: **{total_kh_filtered
 # Tạo row tổng
 total_row = {}
 for col in df_export.columns:
-    if col in ["Gross","Net","Orders"]:
+    if col in ["Gross", "Net", "Orders"]:
+        # các cột số tổng hợp bằng SUM
         total_row[col] = df_export[col].sum()
-    elif col=="Số_điện_thoại":
+    elif col == "CK_%":
+        # với % chiết khấu: lấy trung bình (hoặc bạn thích thì để 0 hay np.nan đều được)
+        total_row[col] = df_export[col].mean()
+    elif col == "Số_điện_thoại":
         total_row[col] = "TỔNG"
     else:
         total_row[col] = ""
+
 df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
 
 # Chỉ hiển thị các cột cần thiết
 df_export_display = df_export_with_total[display_cols]
-st.dataframe(df_export_display, use_container_width=True)
+
+# Streamlit mới khuyến nghị dùng width thay cho use_container_width
+st.dataframe(df_export_display, width="stretch")
+
 
 # Xuất Excel
 st.download_button(
