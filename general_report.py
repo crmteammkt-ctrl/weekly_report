@@ -38,8 +38,6 @@ df = load_data()
 with st.sidebar:
     if st.button("🔄 Cập nhật dữ liệu"):
         rebuild_duckdb_from_drive()
-        st.cache_data.clear()
-        st.cache_resource.clear()
         st.success("Đã cập nhật DB mới — đang load lại dữ liệu…")
         st.rerun()
 
@@ -226,6 +224,8 @@ def group_store(df_store):
     return d.sort_values("Net", ascending=False)
 df_store_group = group_store(df_store)
 
+df_store_group = fix_float(df_store_group, ["CK_%", "Gross", "Net", "Orders", "Customers"])
+
 st.dataframe(df_store_group)
 
 # -------------------------
@@ -260,8 +260,9 @@ def group_product(df):
     )
 df_product_group = group_product(df_product)
 
-
+df_product_group = fix_float(df_product_group, ["Gross","Net","Orders","Customers"])
 st.dataframe(df_product_group)
+
 
 # -------------------------
 # Các phần khác (Pareto, Cohort, Xuất CRM) 
@@ -422,15 +423,30 @@ total_kh_filtered = df_export["Số_điện_thoại"].nunique()
 st.info(f"👥 Tổng số KH theo bộ lọc hiện tại: **{total_kh_filtered:,}** khách hàng")
 
 # Tạo row tổng
+# ---- TOTAL ROW (không làm bể dtype) ----
 total_row = {}
 for col in df_export.columns:
-    if col in ["Gross","Net","Orders"]:
-        total_row[col] = df_export[col].sum()
-    elif col=="Số_điện_thoại":
-        total_row[col] = "TỔNG"
+    if col in ["Gross", "Net", "Orders", "CK_%", "Days_Inactive", "Bao_lâu_không_mua"]:
+        total_row[col] = np.nan
     else:
         total_row[col] = ""
+
+total_row["Số_điện_thoại"] = "TỔNG"
+if "Điểm_mua_hàng" in df_export.columns:
+    total_row["Điểm_mua_hàng"] = ""
+
+for col in ["Gross", "Net", "Orders"]:
+    if col in df_export.columns:
+        total_row[col] = df_export[col].sum()
+
 df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
+
+# Ép các cột số về numeric để PyArrow render ổn định
+num_cols = ["Gross", "Net", "Orders", "CK_%", "Days_Inactive", "Bao_lâu_không_mua"]
+for c in num_cols:
+    if c in df_export_with_total.columns:
+        df_export_with_total[c] = pd.to_numeric(df_export_with_total[c], errors="coerce")
+
 
 # Chỉ hiển thị các cột cần thiết
 df_export_display = df_export_with_total[display_cols]
@@ -496,6 +512,7 @@ df_pareto = pareto_customer_by_store(
     percent=pareto_percent,
     top=(pareto_type=="Top")
 )
+df_pareto = fix_float(df_pareto, ["CK_%", "Contribution_%", "Cum_%", "Gross", "Net", "Orders"])
 
 st.subheader(f"🏆 {pareto_type} {pareto_percent}% KH theo từng Cửa hàng (Pareto)")
 st.dataframe(
