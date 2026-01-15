@@ -3,12 +3,14 @@ import numpy as np
 import streamlit as st
 from io import BytesIO
 
-from load_data import load_data, first_purchase, rebuild_duckdb_from_drive, db_version
-ver = db_version()
-df = load_data (ver)
-# =====================================================
-# Utils
-# =====================================================
+from load_data import (
+    rebuild_duckdb_from_drive,
+    get_date_bounds,
+    get_filter_options,
+    load_data_filtered,
+    first_purchase
+)
+
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -21,47 +23,45 @@ def fix_float(df, cols):
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
     return df
 
-# =====================================================
-# Page config
-# =====================================================
 st.set_page_config(page_title="Marketing Revenue Dashboard", layout="wide")
 st.title("📊 MARKETING REVENUE DASHBOARD")
 
-# =====================================================
-# LOAD DATA (cached by db_version)
-# =====================================================
-ver = db_version()
-df = load_data(ver)
+# ✅ không load full nữa
+min_date, max_date = get_date_bounds()
+loai_opts, brand_opts, region_opts, store_opts = get_filter_options()
 
-# =====================================================
-# SIDEBAR
-# =====================================================
 with st.sidebar:
     if st.button("🔄 Cập nhật dữ liệu"):
-        rebuild_duckdb_from_drive()   # hàm này đã close connection + clear cache_data đúng chỗ
-        st.success("Đã cập nhật DB mới — đang load lại dữ liệu…")
+        rebuild_duckdb_from_drive()
+        st.success("Đã cập nhật DB mới — đang load lại…")
         st.rerun()
 
     st.header("🎛️ Bộ lọc dữ liệu")
     time_type = st.selectbox("Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"])
 
-    start_date = st.date_input("Từ ngày", df["Ngày"].min())
-    end_date   = st.date_input("Đến ngày", df["Ngày"].max())
+    start_date = st.date_input("Từ ngày", min_date)
+    end_date   = st.date_input("Đến ngày", max_date)
 
-    loaiCT_filter = st.multiselect("Loại CT", ["All"] + sorted(df["LoaiCT"].dropna().unique()))
-    brand_filter  = st.multiselect("Brand", ["All"] + sorted(df["Brand"].dropna().unique()))
-    region_filter = st.multiselect("Region", ["All"] + sorted(df["Region"].dropna().unique()))
-    store_filter  = st.multiselect("Cửa hàng", ["All"] + sorted(df["Điểm_mua_hàng"].dropna().unique()))
+    loaiCT_filter = st.multiselect("Loại CT", ["All"] + loai_opts, default=["All"])
+    brand_filter  = st.multiselect("Brand", ["All"] + brand_opts, default=["All"])
+    region_filter = st.multiselect("Region", ["All"] + region_opts, default=["All"])
+    store_filter  = st.multiselect("Cửa hàng", ["All"] + store_opts, default=["All"])
 
 def clean_filter(values, all_values):
     if not values or "All" in values:
         return all_values
     return values
 
-loaiCT_filter = clean_filter(loaiCT_filter, df["LoaiCT"].unique())
-brand_filter  = clean_filter(brand_filter, df["Brand"].unique())
-region_filter = clean_filter(region_filter, df["Region"].unique())
-store_filter  = clean_filter(store_filter, df["Điểm_mua_hàng"].unique())
+loaiCT_filter = clean_filter(loaiCT_filter, loai_opts)
+brand_filter  = clean_filter(brand_filter, brand_opts)
+region_filter = clean_filter(region_filter, region_opts)
+store_filter  = clean_filter(store_filter, store_opts)
+
+# ✅ chỉ load phần dữ liệu cần
+df_f = load_data_filtered(start_date, end_date, loaiCT_filter, brand_filter, region_filter, store_filter)
+
+# ---- các phần KPI / group / CRM giữ nguyên logic của bạn bên dưới ----
+
 
 # =====================================================
 # APPLY FILTER (cache theo input, ok)
@@ -523,31 +523,24 @@ st.download_button(
 )
 
 # =========================
-# ---- KH MỚI VS KH QUAY LẠI (FAST - NO MERGE) ----
-df_fp = first_purchase()  # bảng nhỏ: 1 dòng / SĐT
+df_fp = first_purchase()
 
 @st.cache_data(show_spinner=False)
 def kh_new_vs_returning_count(phones, start_date, df_fp):
     start_dt = pd.to_datetime(start_date)
-
     fp_map = (
         df_fp.dropna(subset=["Số_điện_thoại"])
              .drop_duplicates("Số_điện_thoại")
              .set_index("Số_điện_thoại")["First_Date"]
     )
-
-    # map First_Date cho list SĐT có trong df_f (không tạo df_kh lớn)
     first_dates = pd.Series(phones).map(fp_map)
-
     kh_type = np.where(first_dates >= start_dt, "KH mới", "KH quay lại")
-    out = pd.Series(kh_type).value_counts().rename_axis("KH_type").reset_index(name="Số KH")
-    return out
+    return pd.Series(kh_type).value_counts().rename_axis("KH_type").reset_index(name="Số KH")
 
 phones = df_f["Số_điện_thoại"].dropna().unique()
-kh_count = kh_new_vs_returning_count(phones, start_date, df_fp)
-
 st.subheader("👥 KH mới vs KH quay lại")
-st.dataframe(kh_count, use_container_width=True)
+st.dataframe(kh_new_vs_returning_count(phones, start_date, df_fp), use_container_width=True)
+
 
 
 # =========================
