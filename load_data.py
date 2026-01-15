@@ -8,8 +8,13 @@ import gdown
 # =========================
 # CẤU HÌNH
 # =========================
-GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"  # ID file thiensondb.db
+# DB gốc 512MB trên Google Drive
+GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
+
+# Tên file trên server Streamlit
 SQLITE_DB = "thiensondb.db"
+
+# Bảng dùng cho báo cáo
 TABLE_NAME = "tinhhinhbanhang"
 
 
@@ -18,35 +23,34 @@ TABLE_NAME = "tinhhinhbanhang"
 # =========================
 def rebuild_duckdb_from_drive():
     """
-    (Tên giữ nguyên cho đỡ phải sửa general_report.py)
-    Thực tế: chỉ tải file SQLite từ Google Drive về.
-    Không dùng DuckDB nữa.
+    (Giữ tên hàm cũ cho hợp với general_report.py)
+    Thực tế: chỉ tải file SQLite 512MB từ Google Drive về.
+    KHÔNG dùng DuckDB, KHÔNG convert nặng.
     """
-    with st.spinner("⬇️ Đang tải DB SQLite từ Google Drive (~500MB)..."):
+    with st.spinner("⬇️ Đang tải DB SQLite (thiensondb.db) từ Google Drive (~512MB)..."):
         url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
 
-        # Xóa file cũ nếu có
+        # Xoá file cũ nếu có
         if os.path.exists(SQLITE_DB):
             os.remove(SQLITE_DB)
 
-        # Tải file mới
+        # Tải DB mới
         gdown.download(url, SQLITE_DB, quiet=False)
 
 
 def ensure_sqlite_exists():
     """
     Đảm bảo file SQLite tồn tại trước khi đọc.
-    Lần đầu sẽ tự tải từ Drive.
+    Lần đầu (hoặc sau khi bấm 'Cập nhật dữ liệu') sẽ tự tải từ Drive.
     """
     if not os.path.exists(SQLITE_DB):
         rebuild_duckdb_from_drive()
 
 
-# Dummy cho tương thích import cũ
 def close_connection():
     """
-    Không còn giữ connection global nữa, hàm này chỉ để tương thích.
-    (Không làm gì cả.)
+    Dummy để tương thích với general_report.py.
+    Không giữ connection global nên không cần làm gì cả.
     """
     pass
 
@@ -54,11 +58,10 @@ def close_connection():
 # =========================
 # LOAD MAIN DATA
 # =========================
-@st.cache_data(show_spinner="📦 Loading data từ SQLite...")
+@st.cache_data(show_spinner="📦 Loading data từ thiensondb.db...")
 def load_data():
     """
-    Đọc dữ liệu chính từ bảng tinhhinhbanhang trong SQLite.
-    Không dùng DuckDB.
+    Đọc dữ liệu chính từ bảng tinhhinhbanhang trong thiensondb.db.
     """
     ensure_sqlite_exists()
 
@@ -101,7 +104,7 @@ def load_data():
 @st.cache_data(show_spinner="📅 Calculating first purchase...")
 def first_purchase():
     """
-    Lấy ngày mua đầu tiên của từng SĐT từ cùng bảng tinhhinhbanhang.
+    Lấy ngày mua đầu tiên của từng SĐT từ bảng tinhhinhbanhang.
     """
     ensure_sqlite_exists()
 
