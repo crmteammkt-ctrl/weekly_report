@@ -1,3 +1,4 @@
+# load_data.py
 import os
 import sqlite3
 import duckdb
@@ -6,14 +7,26 @@ import numpy as np
 import streamlit as st
 import gdown
 
+# =========================
+# CẤU HÌNH ĐƯỜNG DẪN
+# =========================
 GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
-SQLITE_DB = "thiensondb.db"
-DUCKDB_DB = "marketing.duckdb"
 TABLE_NAME = "tinhhinhbanhang"
 
+# Dùng đường dẫn tuyệt đối theo vị trí file load_data.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SQLITE_DB = os.path.join(BASE_DIR, "thiensondb.db")
+DUCKDB_DB = os.path.join(BASE_DIR, "marketing.duckdb")
 
+
+# =========================
+# CLOSE CONNECTION + CLEAR CACHE (QUAN TRỌNG)
+# =========================
 def close_connection():
-    # đóng + clear cache_resource để tránh lock file
+    """
+    Đóng connection DuckDB đang được cache + clear cache_resource.
+    Gọi TRƯỚC khi rebuild duckdb để tránh lỗi file bị lock / cấu hình khác.
+    """
     try:
         con = get_connection()
         try:
@@ -21,127 +34,140 @@ def close_connection():
         except Exception:
             pass
     except Exception:
+        # nếu chưa có connection thì bỏ qua
         pass
 
+    # clear toàn bộ cache_resource (bao gồm get_connection)
     try:
         st.cache_resource.clear()
     except Exception:
         pass
 
 
+# =========================
+# HÀM TẢI + CONVERT DB
+# =========================
 def rebuild_duckdb_from_drive():
+    """
+    Download SQLite từ Drive và convert sang DuckDB.
+    Gọi được nhiều lần và KHÔNG làm app lỗi (do dùng file tạm + clear cache đúng chỗ).
+    """
+
+    # 1) ĐÓNG CONNECTION TRƯỚC (QUAN TRỌNG)
     close_connection()
 
+    # 2) Download SQLite (download ra file tạm để an toàn)
     sqlite_tmp = SQLITE_DB + ".tmp"
     if os.path.exists(sqlite_tmp):
-        try: os.remove(sqlite_tmp)
-        except Exception: pass
+        try:
+            os.remove(sqlite_tmp)
+        except Exception:
+            pass
 
     with st.spinner("⬇️ Đang tải DB từ Google Drive (~500MB)..."):
         url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
         gdown.download(url, sqlite_tmp, quiet=False)
 
+    # replace sqlite chính thức
     if os.path.exists(SQLITE_DB):
-        try: os.remove(SQLITE_DB)
-        except Exception: pass
+        try:
+            os.remove(SQLITE_DB)
+        except Exception:
+            pass
     os.replace(sqlite_tmp, SQLITE_DB)
 
+    # 3) Convert SQLite -> DuckDB (ghi ra duckdb tạm rồi replace)
     duck_tmp = DUCKDB_DB + ".tmp"
     if os.path.exists(duck_tmp):
-        try: os.remove(duck_tmp)
-        except Exception: pass
+        try:
+            os.remove(duck_tmp)
+        except Exception:
+            pass
 
     with st.spinner("🦆 Đang convert SQLite → DuckDB..."):
+        # đọc SQLite
         sqlite_conn = sqlite3.connect(SQLITE_DB)
         df = pd.read_sql(f"SELECT * FROM {TABLE_NAME}", sqlite_conn)
         sqlite_conn.close()
 
-        # clean numeric
+        # làm sạch một số cột số hay bị rác ('' hoặc có dấu % ,)
         numeric_cols = ["Tổng_Gross", "Tổng_Net", "CK_%"]
         for col in numeric_cols:
             if col in df.columns:
-                s = df[col].astype(str).str.replace("%", "", regex=False).str.replace(",", "", regex=False)
+                s = df[col].astype(str)
+                s = s.str.replace("%", "", regex=False).str.replace(",", "", regex=False)
                 s = s.replace("", np.nan)
                 df[col] = pd.to_numeric(s, errors="coerce")
 
+        # tạo duckdb tạm
         duck = duckdb.connect(duck_tmp)
-        duck.execute(f"CREATE OR REPLACE TABLE {TABLE_NAME} AS SELECT * FROM df")
+        duck.execute(f"""
+            CREATE OR REPLACE TABLE {TABLE_NAME} AS
+            SELECT * FROM df
+        """)
         duck.close()
 
+    # replace duckdb chính thức (atomic)
     if os.path.exists(DUCKDB_DB):
-        try: os.remove(DUCKDB_DB)
-        except Exception: pass
+        try:
+            os.remove(DUCKDB_DB)
+        except Exception:
+            pass
     os.replace(duck_tmp, DUCKDB_DB)
 
-    # clear cache_data để đọc dữ liệu mới
+    # 4) clear cache_data để load_data/first_purchase đọc dữ liệu mới
     try:
         st.cache_data.clear()
     except Exception:
         pass
 
 
+# =========================
+# GET CONNECTION
+# =========================
 @st.cache_resource(show_spinner="🦆 Opening DuckDB...")
 def get_connection():
+    """
+    Mở DuckDB 1 lần, dùng lại qua cache_resource.
+    Nếu chưa có file DuckDB thì build từ Drive (chỉ lần đầu hoặc sau khi bấm Update).
+    """
     if not os.path.exists(DUCKDB_DB):
+        # lần đầu chưa có DuckDB → build
         rebuild_duckdb_from_drive()
+
+    # dùng read_only=True để tránh vô tình ghi dữ liệu khi query
     return duckdb.connect(DUCKDB_DB, read_only=True)
 
 
-# ✅ chỉ lấy MIN/MAX ngày (nhanh)
-@st.cache_data(show_spinner=False)
-def get_date_bounds():
-    con = get_connection()
-    row = con.execute(f'SELECT MIN("Ngày") AS min_d, MAX("Ngày") AS max_d FROM {TABLE_NAME}').fetchone()
-    return pd.to_datetime(row[0], errors="coerce"), pd.to_datetime(row[1], errors="coerce")
-
-
-# ✅ lấy options filter (nhanh hơn load full)
-@st.cache_data(show_spinner=False)
-def get_filter_options():
-    con = get_connection()
-    # DISTINCT trên từng cột, tránh kéo full table
-    loai = con.execute(f'SELECT DISTINCT "LoaiCT" FROM {TABLE_NAME} WHERE "LoaiCT" IS NOT NULL').df()["LoaiCT"].tolist()
-    brand = con.execute(f'SELECT DISTINCT "Brand" FROM {TABLE_NAME} WHERE "Brand" IS NOT NULL').df()["Brand"].tolist()
-    region = con.execute(f'SELECT DISTINCT "Region" FROM {TABLE_NAME} WHERE "Region" IS NOT NULL').df()["Region"].tolist()
-    store = con.execute(f'SELECT DISTINCT "Điểm_mua_hàng" FROM {TABLE_NAME} WHERE "Điểm_mua_hàng" IS NOT NULL').df()["Điểm_mua_hàng"].tolist()
-    return sorted(loai), sorted(brand), sorted(region), sorted(store)
-
-
-# ✅ load dữ liệu theo filter (chỉ kéo phần cần)
-@st.cache_data(show_spinner="📦 Loading filtered data...")
-def load_data_filtered(start_date, end_date, loaiCT_list, brand_list, region_list, store_list):
-    con = get_connection()
-
-    sql = f"""
-        SELECT
-            "Ngày",
-            "LoaiCT",
-            "Brand",
-            "Region",
-            "Tỉnh_TP",
-            "Điểm_mua_hàng",
-            "Nhóm_hàng",
-            "Tên_hàng",
-            "Số_CT",
-            "tên_KH",
-            "Kiểm_tra_tên",
-            "Số_điện_thoại",
-            "Trạng_thái_số_điện_thoại",
-            "Tổng_Gross",
-            "Tổng_Net"
-        FROM {TABLE_NAME}
-        WHERE "Ngày" BETWEEN ? AND ?
-          AND ("LoaiCT" IN (SELECT * FROM UNNEST(?)))
-          AND ("Brand"  IN (SELECT * FROM UNNEST(?)))
-          AND ("Region" IN (SELECT * FROM UNNEST(?)))
-          AND ("Điểm_mua_hàng" IN (SELECT * FROM UNNEST(?)))
+# =========================
+# LOAD MAIN DATA
+# =========================
+@st.cache_data(show_spinner="📦 Loading data...")
+def load_data():
     """
-
-    df = con.execute(
-        sql,
-        [pd.to_datetime(start_date), pd.to_datetime(end_date),
-         loaiCT_list, brand_list, region_list, store_list]
-    ).df()
+    Đọc dữ liệu chính từ DuckDB.
+    Được cache lại để những lần rerun sau nhanh hơn rất nhiều.
+    """
+    con = get_connection()
+    df = con.execute(f"""
+        SELECT
+            Ngày,
+            LoaiCT,
+            Brand,
+            Region,
+            Tỉnh_TP,
+            Điểm_mua_hàng,
+            Nhóm_hàng,
+            Tên_hàng,
+            Số_CT,
+            tên_KH,
+            Kiểm_tra_tên,
+            Số_điện_thoại,
+            Trạng_thái_số_điện_thoại,
+            Tổng_Gross,
+            Tổng_Net
+        FROM {TABLE_NAME}
+    """).df()
 
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
     df = df.dropna(subset=["Ngày"])
@@ -152,13 +178,20 @@ def load_data_filtered(start_date, end_date, loaiCT_list, brand_list, region_lis
     return df
 
 
-@st.cache_data(show_spinner=False)
+# =========================
+# FIRST PURCHASE
+# =========================
+@st.cache_data(show_spinner="📅 Calculating first purchase...")
 def first_purchase():
+    """
+    Lấy ngày mua đầu tiên của từng SĐT.
+    """
     con = get_connection()
-    df = con.execute(f'''
-        SELECT "Số_điện_thoại", MIN("Ngày") AS First_Date
+    df = con.execute(f"""
+        SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
         FROM {TABLE_NAME}
-        GROUP BY "Số_điện_thoại"
-    ''').df()
+        GROUP BY Số_điện_thoại
+    """).df()
+
     df["First_Date"] = pd.to_datetime(df["First_Date"], errors="coerce")
     return df
