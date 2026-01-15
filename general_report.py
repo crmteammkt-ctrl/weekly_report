@@ -2,10 +2,10 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from io import BytesIO
-from datetime import datetime
 
-from load_data import load_data, first_purchase, rebuild_duckdb_from_drive
-
+from load_data import load_data, first_purchase, rebuild_duckdb_from_drive, db_version
+ver = db_version()
+df = load_data (ver)
 # =====================================================
 # Utils
 # =====================================================
@@ -28,21 +28,21 @@ st.set_page_config(page_title="Marketing Revenue Dashboard", layout="wide")
 st.title("📊 MARKETING REVENUE DASHBOARD")
 
 # =====================================================
-# LOAD DATA
+# LOAD DATA (cached by db_version)
 # =====================================================
-df = load_data()
+ver = db_version()
+df = load_data(ver)
 
 # =====================================================
 # SIDEBAR
 # =====================================================
 with st.sidebar:
     if st.button("🔄 Cập nhật dữ liệu"):
-        rebuild_duckdb_from_drive()
+        rebuild_duckdb_from_drive()   # hàm này đã close connection + clear cache_data đúng chỗ
         st.success("Đã cập nhật DB mới — đang load lại dữ liệu…")
         st.rerun()
 
     st.header("🎛️ Bộ lọc dữ liệu")
-
     time_type = st.selectbox("Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"])
 
     start_date = st.date_input("Từ ngày", df["Ngày"].min())
@@ -53,9 +53,6 @@ with st.sidebar:
     region_filter = st.multiselect("Region", ["All"] + sorted(df["Region"].dropna().unique()))
     store_filter  = st.multiselect("Cửa hàng", ["All"] + sorted(df["Điểm_mua_hàng"].dropna().unique()))
 
-# =====================================================
-# CLEAN FILTER
-# =====================================================
 def clean_filter(values, all_values):
     if not values or "All" in values:
         return all_values
@@ -67,7 +64,7 @@ region_filter = clean_filter(region_filter, df["Region"].unique())
 store_filter  = clean_filter(store_filter, df["Điểm_mua_hàng"].unique())
 
 # =====================================================
-# APPLY FILTER
+# APPLY FILTER (cache theo input, ok)
 # =====================================================
 @st.cache_data(show_spinner=False)
 def apply_filters(df, start_date, end_date, loaiCT, brand, region, store):
@@ -424,28 +421,28 @@ st.info(f"👥 Tổng số KH theo bộ lọc hiện tại: **{total_kh_filtered
 
 # Tạo row tổng
 # ---- TOTAL ROW (không làm bể dtype) ----
-total_row = {}
-for col in df_export.columns:
-    if col in ["Gross", "Net", "Orders", "CK_%", "Days_Inactive", "Bao_lâu_không_mua"]:
-        total_row[col] = np.nan
-    else:
-        total_row[col] = ""
+num_cols = ["Gross", "Net", "Orders", "CK_%", "Days_Inactive", "Bao_lâu_không_mua"]
 
+total_row = {col: "" for col in df_export.columns}
 total_row["Số_điện_thoại"] = "TỔNG"
-if "Điểm_mua_hàng" in df_export.columns:
-    total_row["Điểm_mua_hàng"] = ""
 
-for col in ["Gross", "Net", "Orders"]:
-    if col in df_export.columns:
-        total_row[col] = df_export[col].sum()
+# numeric để NaN trước, lát ép numeric đồng bộ
+for c in num_cols:
+    if c in total_row:
+        total_row[c] = np.nan
+
+# cộng tổng các cột cần sum
+for c in ["Gross", "Net", "Orders"]:
+    if c in df_export.columns:
+        total_row[c] = pd.to_numeric(df_export[c], errors="coerce").sum()
 
 df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
 
-# Ép các cột số về numeric để PyArrow render ổn định
-num_cols = ["Gross", "Net", "Orders", "CK_%", "Days_Inactive", "Bao_lâu_không_mua"]
+# ép numeric 1 lần (KHÔNG lặp)
 for c in num_cols:
     if c in df_export_with_total.columns:
         df_export_with_total[c] = pd.to_numeric(df_export_with_total[c], errors="coerce")
+
 
 
 # Chỉ hiển thị các cột cần thiết
@@ -530,7 +527,7 @@ st.download_button(
 # =========================
 
 
-df_fp = first_purchase()
+df_fp = first_purchase(ver)
 df_kh = df_f.merge(df_fp, on="Số_điện_thoại", how="left")
 df_kh["KH_type"] = np.where(df_kh["First_Date"]>=pd.to_datetime(start_date),"KH mới","KH quay lại")
 
