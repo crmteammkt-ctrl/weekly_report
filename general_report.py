@@ -41,7 +41,6 @@ with st.sidebar:
         close_connection()
         rebuild_duckdb_from_drive()
         st.cache_data.clear()
-        st.cache_resource.clear()
         st.success("Đã cập nhật DB mới — đang load lại dữ liệu…")
         st.rerun()
 

@@ -1,94 +1,69 @@
 import os
-import sqlite3   # vẫn được giữ, nhưng thực ra không còn dùng nhiều
-import duckdb
+import sqlite3
 import pandas as pd
 import numpy as np
 import streamlit as st
 import gdown
 
-GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
+# =========================
+# CẤU HÌNH
+# =========================
+GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"  # ID file thiensondb.db
 SQLITE_DB = "thiensondb.db"
-DUCKDB_DB = "marketing.duckdb"
 TABLE_NAME = "tinhhinhbanhang"
 
 
 # =========================
-# HÀM TẢI + CONVERT DB (NEW)
+# TẢI DB TỪ GOOGLE DRIVE
 # =========================
 def rebuild_duckdb_from_drive():
     """
-    Download SQLite từ Drive và convert sang DuckDB mà KHÔNG dùng pandas,
-    để tránh tốn RAM trên Streamlit Cloud.
+    (Tên giữ nguyên cho đỡ phải sửa general_report.py)
+    Thực tế: chỉ tải file SQLite từ Google Drive về.
+    Không dùng DuckDB nữa.
     """
-    # 1. Tải SQLite
-    with st.spinner("⬇️ Đang tải DB từ Google Drive (~500MB)..."):
+    with st.spinner("⬇️ Đang tải DB SQLite từ Google Drive (~500MB)..."):
         url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
 
+        # Xóa file cũ nếu có
         if os.path.exists(SQLITE_DB):
             os.remove(SQLITE_DB)
 
+        # Tải file mới
         gdown.download(url, SQLITE_DB, quiet=False)
 
-    # 2. Convert SQLite -> DuckDB bằng ATTACH, không qua pandas
-    with st.spinner("🦆 Đang convert SQLite → DuckDB..."):
-        # nếu có file DuckDB cũ thì xóa
-        if os.path.exists(DUCKDB_DB):
-            os.remove(DUCKDB_DB)
 
-        duck = duckdb.connect(DUCKDB_DB)
-
-        # ATTACH SQLite DB vào DuckDB
-        duck.execute(f"ATTACH '{SQLITE_DB}' AS sqlite_db (TYPE sqlite)")
-
-        # Tạo bảng trong DuckDB từ bảng SQLite
-        duck.execute(f"""
-            CREATE TABLE {TABLE_NAME} AS
-            SELECT * FROM sqlite_db.{TABLE_NAME};
-        """)
-
-        duck.close()
-
-
-
-# =========================
-# GET / CLOSE CONNECTION
-# =========================
-@st.cache_resource(show_spinner="🦆 Opening DuckDB...")
-def get_connection():
+def ensure_sqlite_exists():
     """
-    Trả về 1 connection DuckDB được cache.
-    Nếu file DuckDB chưa tồn tại thì tự động build từ Google Drive.
+    Đảm bảo file SQLite tồn tại trước khi đọc.
+    Lần đầu sẽ tự tải từ Drive.
     """
-    if not os.path.exists(DUCKDB_DB):
+    if not os.path.exists(SQLITE_DB):
         rebuild_duckdb_from_drive()
 
-    con = duckdb.connect(DUCKDB_DB)  # mặc định read_write
-    return con
 
-
+# Dummy cho tương thích import cũ
 def close_connection():
     """
-    Đóng connection DuckDB đang được cache.
-    Dùng khi bấm nút 'Cập nhật dữ liệu' rồi sau đó clear cache.
+    Không còn giữ connection global nữa, hàm này chỉ để tương thích.
+    (Không làm gì cả.)
     """
-    try:
-        con = get_connection()
-        con.close()
-    except Exception:
-        # Nếu vì lý do gì đó không close được thì bỏ qua, không để app crash
-        pass
+    pass
 
 
 # =========================
 # LOAD MAIN DATA
 # =========================
-@st.cache_data(show_spinner="📦 Loading data...")
+@st.cache_data(show_spinner="📦 Loading data từ SQLite...")
 def load_data():
     """
-    Đọc dữ liệu chính từ DuckDB, chuẩn hóa kiểu dữ liệu.
+    Đọc dữ liệu chính từ bảng tinhhinhbanhang trong SQLite.
+    Không dùng DuckDB.
     """
-    con = get_connection()
-    df = con.execute(f"""
+    ensure_sqlite_exists()
+
+    conn = sqlite3.connect(SQLITE_DB)
+    df = pd.read_sql(f"""
         SELECT
             Ngày,
             LoaiCT,
@@ -106,13 +81,14 @@ def load_data():
             Tổng_Gross,
             Tổng_Net
         FROM {TABLE_NAME}
-    """).df()
+    """, conn)
+    conn.close()
 
-    # Chuẩn hoá kiểu dữ liệu Ngày
+    # Chuẩn hoá ngày
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
     df = df.dropna(subset=["Ngày"])
 
-    # Chuẩn hoá Gross/Net
+    # Chuẩn hoá số
     for c in ["Tổng_Gross", "Tổng_Net"]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
@@ -125,14 +101,17 @@ def load_data():
 @st.cache_data(show_spinner="📅 Calculating first purchase...")
 def first_purchase():
     """
-    Lấy ngày mua đầu tiên của từng SĐT từ toàn bộ bảng.
+    Lấy ngày mua đầu tiên của từng SĐT từ cùng bảng tinhhinhbanhang.
     """
-    con = get_connection()
-    df = con.execute(f"""
+    ensure_sqlite_exists()
+
+    conn = sqlite3.connect(SQLITE_DB)
+    df = pd.read_sql(f"""
         SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
         FROM {TABLE_NAME}
         GROUP BY Số_điện_thoại
-    """).df()
+    """, conn)
+    conn.close()
 
     df["First_Date"] = pd.to_datetime(df["First_Date"], errors="coerce")
     return df
