@@ -523,18 +523,32 @@ st.download_button(
 )
 
 # =========================
-# KH MỚI VS KH QUAY LẠI
-# =========================
+# ---- KH MỚI VS KH QUAY LẠI (FAST - NO MERGE) ----
+df_fp = first_purchase()  # bảng nhỏ: 1 dòng / SĐT
 
+@st.cache_data(show_spinner=False)
+def kh_new_vs_returning_count(phones, start_date, df_fp):
+    start_dt = pd.to_datetime(start_date)
 
-df_fp = first_purchase(ver)
-df_kh = df_f.merge(df_fp, on="Số_điện_thoại", how="left")
-df_kh["KH_type"] = np.where(df_kh["First_Date"]>=pd.to_datetime(start_date),"KH mới","KH quay lại")
+    fp_map = (
+        df_fp.dropna(subset=["Số_điện_thoại"])
+             .drop_duplicates("Số_điện_thoại")
+             .set_index("Số_điện_thoại")["First_Date"]
+    )
+
+    # map First_Date cho list SĐT có trong df_f (không tạo df_kh lớn)
+    first_dates = pd.Series(phones).map(fp_map)
+
+    kh_type = np.where(first_dates >= start_dt, "KH mới", "KH quay lại")
+    out = pd.Series(kh_type).value_counts().rename_axis("KH_type").reset_index(name="Số KH")
+    return out
+
+phones = df_f["Số_điện_thoại"].dropna().unique()
+kh_count = kh_new_vs_returning_count(phones, start_date, df_fp)
 
 st.subheader("👥 KH mới vs KH quay lại")
-st.dataframe(
-    df_kh.groupby("KH_type")["Số_điện_thoại"].nunique().reset_index(name="Số KH")
-)
+st.dataframe(kh_count, use_container_width=True)
+
 
 # =========================
 # COHORT RETENTION – CỘNG DỒN (%)
