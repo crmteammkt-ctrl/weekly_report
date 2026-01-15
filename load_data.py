@@ -1,4 +1,3 @@
-# load_data.py
 import os
 import sqlite3
 import duckdb
@@ -7,119 +6,52 @@ import numpy as np
 import streamlit as st
 import gdown
 
-# =========================
-# CẤU HÌNH ĐƯỜNG DẪN
-# =========================
 GOOGLE_DRIVE_FILE_ID = "1ETbZl4gU4uqneZ8sJKtXbS80gMgRcuzH"
+SQLITE_DB = "thiensondb.db"
+DUCKDB_DB = "marketing.duckdb"
 TABLE_NAME = "tinhhinhbanhang"
-
-# Dùng đường dẫn tuyệt đối theo vị trí file load_data.py
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SQLITE_DB = os.path.join(BASE_DIR, "thiensondb.db")
-DUCKDB_DB = os.path.join(BASE_DIR, "marketing.duckdb")
-
-
-# =========================
-# CLOSE CONNECTION + CLEAR CACHE (QUAN TRỌNG)
-# =========================
-def close_connection():
-    """
-    Đóng connection DuckDB đang được cache + clear cache_resource.
-    Gọi TRƯỚC khi rebuild duckdb để tránh lỗi file bị lock / cấu hình khác.
-    """
-    try:
-        con = get_connection()
-        try:
-            con.close()
-        except Exception:
-            pass
-    except Exception:
-        # nếu chưa có connection thì bỏ qua
-        pass
-
-    # clear toàn bộ cache_resource (bao gồm get_connection)
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
 
 
 # =========================
 # HÀM TẢI + CONVERT DB
 # =========================
 def rebuild_duckdb_from_drive():
+    """Download SQLite từ Drive và convert sang DuckDB. 
+    Gọi được nhiều lần, kể cả khi file không đổi cũng không sao.
     """
-    Download SQLite từ Drive và convert sang DuckDB.
-    Gọi được nhiều lần và KHÔNG làm app lỗi (do dùng file tạm + clear cache đúng chỗ).
-    """
-
-    # 1) ĐÓNG CONNECTION TRƯỚC (QUAN TRỌNG)
-    close_connection()
-
-    # 2) Download SQLite (download ra file tạm để an toàn)
-    sqlite_tmp = SQLITE_DB + ".tmp"
-    if os.path.exists(sqlite_tmp):
-        try:
-            os.remove(sqlite_tmp)
-        except Exception:
-            pass
-
     with st.spinner("⬇️ Đang tải DB từ Google Drive (~500MB)..."):
         url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
-        gdown.download(url, sqlite_tmp, quiet=False)
-
-    # replace sqlite chính thức
-    if os.path.exists(SQLITE_DB):
-        try:
+        # Luôn tải đè, cho chắc
+        if os.path.exists(SQLITE_DB):
             os.remove(SQLITE_DB)
-        except Exception:
-            pass
-    os.replace(sqlite_tmp, SQLITE_DB)
-
-    # 3) Convert SQLite -> DuckDB (ghi ra duckdb tạm rồi replace)
-    duck_tmp = DUCKDB_DB + ".tmp"
-    if os.path.exists(duck_tmp):
-        try:
-            os.remove(duck_tmp)
-        except Exception:
-            pass
+        gdown.download(url, SQLITE_DB, quiet=False)
 
     with st.spinner("🦆 Đang convert SQLite → DuckDB..."):
-        # đọc SQLite
+        # Đọc SQLite
         sqlite_conn = sqlite3.connect(SQLITE_DB)
         df = pd.read_sql(f"SELECT * FROM {TABLE_NAME}", sqlite_conn)
         sqlite_conn.close()
 
-        # làm sạch một số cột số hay bị rác ('' hoặc có dấu % ,)
+        # ---- Làm sạch các cột số / % có thể bị '' ----
         numeric_cols = ["Tổng_Gross", "Tổng_Net", "CK_%"]
         for col in numeric_cols:
             if col in df.columns:
-                s = df[col].astype(str)
-                s = s.str.replace("%", "", regex=False).str.replace(",", "", regex=False)
-                s = s.replace("", np.nan)
-                df[col] = pd.to_numeric(s, errors="coerce")
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.replace("%", "", regex=False)
+                    .str.replace(",", "", regex=False)
+                    .replace("", np.nan)
+                )
+                df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # tạo duckdb tạm
-        duck = duckdb.connect(duck_tmp)
+        # Ghi sang DuckDB
+        duck = duckdb.connect(DUCKDB_DB)  # KHÔNG dùng read_only
         duck.execute(f"""
             CREATE OR REPLACE TABLE {TABLE_NAME} AS
             SELECT * FROM df
         """)
         duck.close()
-
-    # replace duckdb chính thức (atomic)
-    if os.path.exists(DUCKDB_DB):
-        try:
-            os.remove(DUCKDB_DB)
-        except Exception:
-            pass
-    os.replace(duck_tmp, DUCKDB_DB)
-
-    # 4) clear cache_data để load_data/first_purchase đọc dữ liệu mới
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
 
 
 # =========================
@@ -127,16 +59,12 @@ def rebuild_duckdb_from_drive():
 # =========================
 @st.cache_resource(show_spinner="🦆 Opening DuckDB...")
 def get_connection():
-    """
-    Mở DuckDB 1 lần, dùng lại qua cache_resource.
-    Nếu chưa có file DuckDB thì build từ Drive (chỉ lần đầu hoặc sau khi bấm Update).
-    """
+    # Lần đầu chưa có DuckDB → build từ Drive
     if not os.path.exists(DUCKDB_DB):
-        # lần đầu chưa có DuckDB → build
         rebuild_duckdb_from_drive()
 
-    # dùng read_only=True để tránh vô tình ghi dữ liệu khi query
-    return duckdb.connect(DUCKDB_DB, read_only=True)
+    # Không dùng read_only để cấu hình tất cả connection giống nhau
+    return duckdb.connect(DUCKDB_DB)
 
 
 # =========================
@@ -144,10 +72,6 @@ def get_connection():
 # =========================
 @st.cache_data(show_spinner="📦 Loading data...")
 def load_data():
-    """
-    Đọc dữ liệu chính từ DuckDB.
-    Được cache lại để những lần rerun sau nhanh hơn rất nhiều.
-    """
     con = get_connection()
     df = con.execute(f"""
         SELECT
@@ -169,6 +93,7 @@ def load_data():
         FROM {TABLE_NAME}
     """).df()
 
+    # Chuẩn hoá kiểu dữ liệu
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
     df = df.dropna(subset=["Ngày"])
 
@@ -183,9 +108,6 @@ def load_data():
 # =========================
 @st.cache_data(show_spinner="📅 Calculating first purchase...")
 def first_purchase():
-    """
-    Lấy ngày mua đầu tiên của từng SĐT.
-    """
     con = get_connection()
     df = con.execute(f"""
         SELECT Số_điện_thoại, MIN(Ngày) AS First_Date
