@@ -37,6 +37,7 @@ df = load_data()
 # =====================================================
 with st.sidebar:
     if st.button("🔄 Cập nhật dữ liệu"):
+        # Đóng connection hiện tại, rebuild DB rồi clear cache và rerun
         close_connection()
         rebuild_duckdb_from_drive()
         st.cache_data.clear()
@@ -97,11 +98,11 @@ df_f = apply_filters(
 # TIME COLUMN
 # =====================================================
 df_f_time = df_f.copy()
-if time_type == "Ngày":  df_f_time["Time"] = df_f_time["Ngày"].dt.date
+if time_type == "Ngày":   df_f_time["Time"] = df_f_time["Ngày"].dt.date
 elif time_type == "Tuần": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("W").astype(str)
 elif time_type == "Tháng": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
-elif time_type == "Quý": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
-elif time_type == "Năm": df_f_time["Time"] = df_f_time["Ngày"].dt.year
+elif time_type == "Quý":  df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
+elif time_type == "Năm":  df_f_time["Time"] = df_f_time["Ngày"].dt.year
 
 # =====================================================
 # KPI
@@ -225,8 +226,8 @@ def group_store(df_store):
     ).round(2)
 
     return d.sort_values("Net", ascending=False)
-df_store_group = group_store(df_store)
 
+df_store_group = group_store(df_store)
 st.dataframe(df_store_group)
 
 # -------------------------
@@ -259,14 +260,10 @@ def group_product(df):
         .reset_index()
         .sort_values("Net", ascending=False)
     )
+
 df_product_group = group_product(df_product)
-
-
 st.dataframe(df_product_group)
 
-# -------------------------
-# Các phần khác (Pareto, Cohort, Xuất CRM) 
-# -------------------------
 # =========================
 # PARAMETER XUẤT CRM & PHÂN LOẠI KH
 # =========================
@@ -317,8 +314,8 @@ def build_crm(df_f, group_cols):
         .reset_index()
     )
     return d
-df_export = build_crm(df_f, group_cols)
 
+df_export = build_crm(df_f, group_cols)
 
 df_export["CK_%"] = np.where(
     df_export["Gross"]>0,
@@ -482,15 +479,12 @@ def pareto_customer_by_store(df, percent=20, top=True):
         n = max(1, int(len(g) * percent / 100))
         g_sel = g.head(n) if top else g.tail(n)
 
-        # tránh SettingWithCopyWarning
         g_sel = g_sel.copy()
         g_sel.loc[:, "Điểm_mua_hàng"] = store
 
         rows.append(g_sel)
 
     return pd.concat(rows, ignore_index=True)
-
-
 
 df_pareto = pareto_customer_by_store(
     df_pareto_base,
@@ -512,8 +506,6 @@ st.download_button(
 # =========================
 # KH MỚI VS KH QUAY LẠI
 # =========================
-
-
 df_fp = first_purchase()
 df_kh = df_f.merge(df_fp, on="Số_điện_thoại", how="left")
 df_kh["KH_type"] = np.where(df_kh["First_Date"]>=pd.to_datetime(start_date),"KH mới","KH quay lại")
@@ -537,7 +529,6 @@ MAX_MONTH = st.sidebar.slider(
 
 df_cohort = df_f.copy()
 
-# --- Bổ sung xử lý NaT để tránh lỗi TypeError ---
 df_cohort["Ngày"] = pd.to_datetime(df_cohort["Ngày"], errors="coerce")
 df_cohort = df_cohort.dropna(subset=["Ngày"])
 
@@ -588,5 +579,3 @@ retention = pd.concat([retention, pd.DataFrame([grand])], ignore_index=True)
 
 st.subheader("🏅 Cohort Retention – Cộng dồn (%)")
 st.dataframe(retention)
-
-
