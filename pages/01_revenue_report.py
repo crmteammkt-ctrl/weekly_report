@@ -7,6 +7,7 @@ from load_data import load_data  # dùng chung dữ liệu Parquet
 # =====================
 # TITLE
 # =====================
+st.set_page_config(layout="wide")
 st.title("📈 Báo cáo Doanh thu")
 
 # =====================
