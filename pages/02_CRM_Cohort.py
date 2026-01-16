@@ -150,7 +150,7 @@ df_export["Bao_lâu_không_mua"] = np.where(
     df_export["KH_tag"] == "KH Inactive",
     df_export["Days_Inactive"],
     np.nan
-)
+).astype("float")
 
 df_export = df_export[df_export["Net"] >= min_net]
 
@@ -239,8 +239,13 @@ for col in df_export.columns:
         total_row[col] = pd.NaT
     elif col == "Số_điện_thoại":
         total_row[col] = "TỔNG"
+    elif col == "Bao_lâu_không_mua":
+        # để NaN, giữ kiểu số
+        total_row[col] = np.nan
     else:
+        # các cột text khác để rỗng cũng được
         total_row[col] = ""
+
 
 df_export_with_total = pd.concat(
     [df_export, pd.DataFrame([total_row])],
@@ -248,6 +253,7 @@ df_export_with_total = pd.concat(
 )
 
 df_export_display = df_export_with_total[display_cols]
+df_export_display["Bao_lâu_không_mua"] = df_export_display["Bao_lâu_không_mua"].fillna("")
 st.dataframe(df_export_display, width="stretch")
 
 st.download_button(
