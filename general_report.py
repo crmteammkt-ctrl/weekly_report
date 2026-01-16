@@ -195,15 +195,15 @@ col1,col2 = st.columns(2)
 with col1:
     nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", sorted(df_product["Nhóm_hàng"].dropna().unique()))
 with col2:
-    ten_sp_selected = st.multiselect("🏷️ Chọn Tên hàng", sorted(df_product["Tên_hàng"].dropna().unique()))
+    ten_sp_selected = st.multiselect("🏷️ Chọn Tên hàng", sorted(df_product["Mã_NB"].dropna().unique()))
 
 if nhom_sp_selected:
     df_product = df_product[df_product["Nhóm_hàng"].isin(nhom_sp_selected)]
 if ten_sp_selected:
-    df_product = df_product[df_product["Tên_hàng"].isin(ten_sp_selected)]
+    df_product = df_product[df_product["Mã_NB"].isin(ten_sp_selected)]
 
 df_product_group = (
-    df_product.groupby("Tên_hàng")
+    df_product.groupby("Mã_NB")
     .agg(
         Gross=("Tổng_Gross","sum"),
         Net=("Tổng_Net","sum"),
