@@ -264,18 +264,18 @@ def main():
         )
     with col2:
         ten_sp_selected = st.multiselect(
-            "🏷️ Chọn Tên hàng", sorted(df_product["Tên_hàng"].dropna().unique())
+            "🏷️ Chọn Mã NB", sorted(df_product["Mã_NB"].dropna().unique())
         )
 
     if nhom_sp_selected:
         df_product = df_product[df_product["Nhóm_hàng"].isin(nhom_sp_selected)]
     if ten_sp_selected:
-        df_product = df_product[df_product["Tên_hàng"].isin(ten_sp_selected)]
+        df_product = df_product[df_product["Mã_NB"].isin(ten_sp_selected)]
 
     @st.cache_data(show_spinner=False)
     def group_product(df):
         return (
-            df.groupby("Tên_hàng")
+            df.groupby("Mã_NB")
             .agg(
                 Gross=("Tổng_Gross", "sum"),
                 Net=("Tổng_Net", "sum"),
