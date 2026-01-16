@@ -3,7 +3,27 @@ import streamlit as st
 import plotly.express as px
 
 from load_data import load_data  # dùng chung dữ liệu Parquet
+# =====================================================
+# Helper: Đọc & gộp nhiều file parquet upload
+# =====================================================
+@st.cache_data(show_spinner="📦 Đang đọc file parquet upload...")
+def load_parquet_from_upload(files):
+    if not files:
+        return pd.DataFrame()
 
+    dfs = []
+    for f in files:
+        d = pd.read_parquet(f)
+        dfs.append(d)
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    # Chuẩn hoá cột Ngày
+    if "Ngày" in df.columns:
+        df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+        df = df.dropna(subset=["Ngày"])
+
+    return df
 # =====================
 # TITLE
 # =====================
@@ -15,7 +35,39 @@ st.title("📈 Báo cáo Doanh thu")
 # =====================
 @st.cache_data(show_spinner="📦 Đang load dữ liệu...")
 def get_data():
+    # =====================================================
+# LOAD DATA (mặc định + upload linh hoạt)
+# =====================================================
+   with st.sidebar:
+    st.markdown("### 🗂 Chọn nguồn dữ liệu")
+
+    data_source = st.radio(
+        "Nguồn dữ liệu",
+        ["Dùng dữ liệu mặc định trên server", "Upload file parquet từ máy"],
+        index=0,
+        key="data_source_main"
+    )
+
+    uploaded_files = None
+    if data_source == "Upload file parquet từ máy":
+        uploaded_files = st.file_uploader(
+            "📁 Chọn 1 hoặc nhiều file .parquet",
+            type=["parquet"],
+            accept_multiple_files=True,
+            key="parquet_uploader_main"
+        )
+
+# Quyết định dùng dữ liệu nào
+   if data_source == "Upload file parquet từ máy" and uploaded_files:
+    df = load_parquet_from_upload(uploaded_files)
+    if df.empty:
+        st.warning("⚠ File parquet upload không có dữ liệu hợp lệ. Đang dùng DataFrame rỗng.")
+    else:
+        st.success(f"✅ Đang dùng dữ liệu từ {len(uploaded_files)} file parquet upload")
+   else:
     df = load_data()
+    st.sidebar.info("📦 Đang dùng dữ liệu parquet mặc định trên server (load_data).")
+
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
     return df.dropna(subset=["Ngày"])
 
