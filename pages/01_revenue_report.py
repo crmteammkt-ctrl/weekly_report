@@ -1,4 +1,4 @@
-# pages/01_Revenue_Report.py
+# pages/01_revenue_report.py
 
 import pandas as pd
 import numpy as np
@@ -150,7 +150,7 @@ def summary_with_discount(df_in, freq, label):
         title=f"Doanh thu theo {label}",
     )
     fig.update_layout(yaxis_title="VNĐ")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     return d
 
@@ -159,7 +159,8 @@ col1, col2 = st.columns(2)
 with col1:
     df_week = summary_with_discount(df_filtered, "W", "Tuần")
 with col2:
-    df_month = summary_with_discount(df_filtered, "M", "Tháng")
+    # dùng 'ME' thay cho 'M' để tránh FutureWarning
+    df_month = summary_with_discount(df_filtered, "ME", "Tháng")
 
 # =====================
 # Báo cáo theo Region
@@ -261,7 +262,7 @@ else:
         barmode="group",
         title="Doanh thu theo Region",
     )
-    st.plotly_chart(fig_r, use_container_width=True)
+    st.plotly_chart(fig_r, width="stretch")
 
 # =====================
 # Báo cáo theo Điểm mua hàng
@@ -321,7 +322,7 @@ if not df_filtered.empty:
         height=900,
     )
     fig_store.update_layout(yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig_store, use_container_width=True)
+    st.plotly_chart(fig_store, width="stretch")
 else:
     df_store = pd.DataFrame()
 
@@ -484,13 +485,15 @@ def to_excel(df_dict):
     output = io.BytesIO()
     wb = Workbook()
 
-    for i, (sheet_name, d) in enumerate(df_dict.items()):
+    first_sheet = True
+    for sheet_name, d in df_dict.items():
         if d is None or d.empty:
             continue
 
-        if i == 0:
+        if first_sheet:
             ws = wb.active
             ws.title = sheet_name
+            first_sheet = False
         else:
             ws = wb.create_sheet(sheet_name)
 
