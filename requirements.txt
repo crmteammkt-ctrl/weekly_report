@@ -3,6 +3,4 @@ numpy
 streamlit>=1.22
 plotly
 openpyxl
-requests
-gdown
-duckdb
+pyarrow
