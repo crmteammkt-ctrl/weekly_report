@@ -16,7 +16,7 @@ def close_connection():
 
 
 @st.cache_data(show_spinner="📦 Loading data từ Parquet...")
-def load_data():
+def load_data() -> pd.DataFrame:
     if not os.path.exists(PARQUET_FILE):
         st.error(f"Không thấy file dữ liệu: {PARQUET_FILE}")
         st.stop()
@@ -32,10 +32,61 @@ def load_data():
 
     return df
 
+# =========================
+# 2. DỮ LIỆU ĐANG DÙNG CHUNG CHO TOÀN APP
+# =========================
+def get_active_data() -> pd.DataFrame:
+    """
+    Trả về DataFrame đang được dùng cho MỌI TRANG.
+    - Nếu chưa có trong session_state -> load từ Parquet mặc định.
+    - Nếu đã upload từ General Report -> lấy bản đã upload.
+    """
+    if "active_df" not in st.session_state:
+        df = load_data()
+        st.session_state["active_df"] = df
+        st.session_state["active_source"] = "default"
+    return st.session_state["active_df"]
 
-@st.cache_data(show_spinner="📅 Calculating first purchase...")
-def first_purchase():
-    df = load_data()
+def set_active_data(df: pd.DataFrame, source: str = "upload") -> None:
+    """
+    Cập nhật DataFrame dùng chung cho toàn app.
+    (Gọi khi user upload file parquet mới ở General Report)
+    """
+    df = df.copy()
+
+    # Chuẩn hoá ngày
+    if "Ngày" in df.columns:
+        df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+        df = df.dropna(subset=["Ngày"])
+
+    # Chuẩn hoá số
+    for c in ["Tổng_Gross", "Tổng_Net"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    st.session_state["active_df"] = df
+    st.session_state["active_source"] = source
+
+
+# =========================
+# 3. FIRST PURCHASE (KH mới / KH quay lại)
+# =========================
+def first_purchase(df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Trả về bảng:
+        Số_điện_thoại | First_Date
+
+    - Nếu không truyền df -> tự lấy từ get_active_data()
+    - KHÔNG dùng cache_data ở đây để khi upload parquet mới,
+      kết quả First_Date cũng thay đổi theo.
+    """
+    if df is None:
+        df = get_active_data()
+
+    if "Số_điện_thoại" not in df.columns or "Ngày" not in df.columns:
+        # Tránh crash nếu thiếu cột
+        return pd.DataFrame(columns=["Số_điện_thoại", "First_Date"])
+
     fp = (
         df.groupby("Số_điện_thoại", as_index=False)["Ngày"]
         .min()

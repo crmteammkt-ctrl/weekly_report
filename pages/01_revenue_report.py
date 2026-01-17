@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from load_data import load_data  # dùng chung dữ liệu Parquet
+from load_data import get_active_data # dùng chung dữ liệu Parquet
 
 # =====================================================
 # CONFIG
@@ -10,66 +10,16 @@ from load_data import load_data  # dùng chung dữ liệu Parquet
 st.set_page_config(page_title="📈 Báo cáo Doanh thu", layout="wide")
 st.title("📈 Báo cáo Doanh thu")
 
-# =====================================================
-# Helper: Đọc & gộp nhiều file parquet upload
-# =====================================================
-@st.cache_data(show_spinner="📦 Đang đọc file parquet upload...")
-def load_parquet_from_upload(files):
-    if not files:
-        return pd.DataFrame()
-
-    dfs = []
-    for f in files:
-        d = pd.read_parquet(f)
-        dfs.append(d)
-
-    df = pd.concat(dfs, ignore_index=True)
-
-    # Chuẩn hoá cột Ngày
-    if "Ngày" in df.columns:
-        df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
-        df = df.dropna(subset=["Ngày"])
-
-    return df
-
 
 # =====================================================
-# CHỌN NGUỒN DỮ LIỆU
+# LẤY DỮ LIỆU HIỆN HÀNH
 # =====================================================
-with st.sidebar:
-    st.markdown("### 🗂 Chọn nguồn dữ liệu")
+df = get_active_data()
 
-    data_source = st.radio(
-        "Nguồn dữ liệu",
-        ["Dùng dữ liệu mặc định trên server", "Upload file parquet từ máy"],
-        index=0,
-        key="data_source_main",
-    )
+if df.empty:
+    st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
+    st.stop()
 
-    uploaded_files = None
-    if data_source == "Upload file parquet từ máy":
-        uploaded_files = st.file_uploader(
-            "📁 Chọn 1 hoặc nhiều file .parquet",
-            type=["parquet"],
-            accept_multiple_files=True,
-            key="parquet_uploader_main",
-        )
-
-# Quyết định dùng dữ liệu nào
-if data_source == "Upload file parquet từ máy" and uploaded_files:
-    df = load_parquet_from_upload(uploaded_files)
-    if df.empty:
-        st.warning(
-            "⚠ File parquet upload không có dữ liệu hợp lệ. "
-            "Đang dùng DataFrame rỗng, các bảng phía dưới có thể không hiển thị gì."
-        )
-    else:
-        st.success(f"✅ Đang dùng dữ liệu từ {len(uploaded_files)} file parquet upload")
-else:
-    df = load_data()
-    df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
-    df = df.dropna(subset=["Ngày"])
-    st.sidebar.info("📦 Đang dùng dữ liệu parquet mặc định trên server (load_data).")
 
 
 # =====================================================

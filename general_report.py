@@ -4,7 +4,7 @@ import streamlit as st
 from io import BytesIO
 from datetime import datetime
 
-from load_data import load_data  # dùng chung parquet
+from load_data import get_active_data, set_active_data, first_purchase  # dùng chung parquet
 # =====================================================
 # Helper: Đọc & gộp nhiều file parquet upload
 # =====================================================
@@ -48,15 +48,14 @@ st.set_page_config(page_title="Marketing Revenue Dashboard", layout="wide")
 st.title("📊 MARKETING REVENUE DASHBOARD – Tổng quan")
 
 # =====================================================
-# LOAD DATA (có cache ở load_data.py)
-# =====================================================
-# =====================================================
 # LOAD DATA (mặc định + upload linh hoạt)
 # =====================================================
+df = get_active_data()
+
 with st.sidebar:
     st.markdown("### 🗂 Chọn nguồn dữ liệu")
 
-    data_source = st.radio(
+    scr_choice = st.radio(
         "Nguồn dữ liệu",
         ["Dùng dữ liệu mặc định trên server", "Upload file parquet từ máy"],
         index=0,
@@ -64,7 +63,7 @@ with st.sidebar:
     )
 
     uploaded_files = None
-    if data_source == "Upload file parquet từ máy":
+    if scr_choice == "Upload file parquet từ máy":
         uploaded_files = st.file_uploader(
             "📁 Chọn 1 hoặc nhiều file .parquet",
             type=["parquet"],
@@ -72,19 +71,28 @@ with st.sidebar:
             key="parquet_uploader_main"
         )
 
-# Quyết định dùng dữ liệu nào
-if data_source == "Upload file parquet từ máy" and uploaded_files:
-    df = load_parquet_from_upload(uploaded_files)
-    if df.empty:
+# Xử lý lựa chọn nguồn
+if scr_choice == "Upload file parquet từ máy" and uploaded_files:
+    df_up = load_parquet_from_upload(uploaded_files)
+    if df_up.empty:
         st.warning("⚠ File parquet upload không có dữ liệu hợp lệ. Đang dùng DataFrame rỗng.")
     else:
+        set_active_data(df_up, source="upload")
         st.success(f"✅ Đang dùng dữ liệu từ {len(uploaded_files)} file parquet upload")
-else:
-    df = load_data()
-    st.sidebar.info("📦 Đang dùng dữ liệu parquet mặc định trên server (load_data).")
+elif scr_choice == "Quay lại dữ liệu mặc định":
+    #Xoá active df để get_active_data() tự load lại
+    if "active_df" in st.session_state:
+        del st.session_state["active_df"]
+    _ = get_active_data()
+    st.success("Đã quay lại dùng dữ liệu mặc định trên sever")
 
-df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
-df = df.dropna(subset=["Ngày"])
+#Sau khi có thể đã thay đổi, luôn lấy lại dữ liệu đang active
+df = get_active_data()
+st.siderbar.caption(
+    "Đang dùng nguồn: **{}**".format(
+        st.session_state.get("active_source","default")
+    )
+)
 
 # =====================================================
 # SIDEBAR
@@ -144,7 +152,14 @@ df_f = apply_filters(
 # =====================================================
 df_f_time = df_f.copy()
 if time_type == "Ngày":   df_f_time["Time"] = df_f_time["Ngày"].dt.date
-elif time_type == "Tuần": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("W").astype(str)
+elif time_type == "Tuần":
+    iso = df_f_time["Ngày"].dt.isocalendar()   # year, week, day
+    df_f_time["Time"] = (
+        "Tuần "
+        + iso["week"].astype(str).str.zfill(2)
+        + "/"
+        + iso["year"].astype(str)
+    )
 elif time_type == "Tháng": df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
 elif time_type == "Quý":  df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
 elif time_type == "Năm":  df_f_time["Time"] = df_f_time["Ngày"].dt.year
