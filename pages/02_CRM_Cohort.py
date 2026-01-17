@@ -6,7 +6,8 @@ import streamlit as st
 from io import BytesIO
 from datetime import datetime
 
-from load_data import get_active_data
+from load_data import get_active_data, first_purchase  # ✅ thêm first_purchase
+
 # =====================================================
 # Utils
 # =====================================================
@@ -27,7 +28,7 @@ if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
     st.stop()
 
-# Đảm bảo cột Ngày là datetime (thường load_data / set_active_data đã làm rồi)
+# Đảm bảo cột Ngày là datetime
 if "Ngày" in df.columns:
     df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
     df = df.dropna(subset=["Ngày"])
@@ -77,6 +78,11 @@ df_f = apply_filters(
     region_filter,
     store_filter
 )
+
+# ✅ Chặn trường hợp không có dữ liệu sau lọc
+if df_f.empty:
+    st.warning("⚠ Không có dữ liệu sau khi áp bộ lọc. Vui lòng nới lỏng điều kiện lọc.")
+    st.stop()
 
 today = df_f["Ngày"].max()
 
@@ -246,12 +252,9 @@ for col in df_export.columns:
     elif col == "Số_điện_thoại":
         total_row[col] = "TỔNG"
     elif col == "Bao_lâu_không_mua":
-        # để NaN, giữ kiểu số
         total_row[col] = np.nan
     else:
-        # các cột text khác để rỗng cũng được
         total_row[col] = ""
-
 
 df_export_with_total = pd.concat(
     [df_export, pd.DataFrame([total_row])],

@@ -15,6 +15,14 @@ st.title("📈 Báo cáo Doanh thu")
 # LẤY DỮ LIỆU HIỆN HÀNH
 # =====================================================
 df = get_active_data()
+st.sidebar.caption(
+    "🔎 Đang dùng nguồn: **{}**".format(
+        st.session_state.get("active_source", "default")
+    )
+)
+
+df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+df = df.dropna(subset=["Ngày"])
 
 if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
@@ -25,9 +33,6 @@ if df.empty:
 # =====================================================
 # SIDEBAR FILTER
 # =====================================================
-if df.empty:
-    st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu / file upload.")
-    st.stop()
 
 brands   = sorted(df["Brand"].dropna().unique())
 regions  = sorted(df["Region"].dropna().unique())
