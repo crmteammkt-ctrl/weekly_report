@@ -35,23 +35,28 @@ def load_data() -> pd.DataFrame:
 # =========================
 # 2. DỮ LIỆU ĐANG DÙNG CHUNG CHO TOÀN APP
 # =========================
-def get_active_data() -> pd.DataFrame:
+def get_active_data():
     """
     Trả về DataFrame đang được dùng cho MỌI TRANG.
     - Nếu chưa có trong session_state -> load từ Parquet mặc định.
     - Nếu đã upload từ General Report -> lấy bản đã upload.
     """
     if "active_df" not in st.session_state:
-        df = load_data()
-        st.session_state["active_df"] = df
-        st.session_state["active_source"] = "default"
-    return st.session_state["active_df"]
+        return st.session_state["active_df"]
+    
+    df = load_data()
+    st.session_state["active_df"] = df
+    st.session_state["active_source"] = "default"
+    return df
 
-def set_active_data(df: pd.DataFrame, source: str = "upload") -> None:
+def set_active_data(df: pd.DataFrame, source: str = "upload"):
     """
     Cập nhật DataFrame dùng chung cho toàn app.
     (Gọi khi user upload file parquet mới ở General Report)
     """
+    if df is None or df.empty:
+        return
+    
     df = df.copy()
 
     # Chuẩn hoá ngày
