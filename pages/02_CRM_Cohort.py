@@ -201,10 +201,10 @@ if "kiem_tra_ten_filter" not in st.session_state:
 with col4:
     kiem_tra_ten_filter = st.multiselect(
         "Kiểm tra tên KH",
-        options=df_f["Kiểm_tra_tên"].dropna().unique(),
-        default = st.session_state.kiem_tra_ten_filter
-    )
-    st.session_state.kiem_tra_ten_filter = kiem_tra_ten_filter
+        options=df_f["Kiểm_tra_tên"].dropna().unique())
+        
+    
+    
 with col5:
     check_sdt_filter = st.multiselect(
         "Check SĐT",
