@@ -4,7 +4,7 @@ import numpy as np
 import streamlit as st
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PARQUET_FILE = os.path.join(BASE_DIR, "data", "report_last_90_days.parquet")
+PARQUET_FILE = os.path.join(BASE_DIR, "data", "data.parquet")
 
 
 # =========================
