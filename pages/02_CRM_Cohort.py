@@ -262,7 +262,13 @@ df_export_with_total = pd.concat(
 )
 
 df_export_display = df_export_with_total[display_cols].copy()
-df_export_display.loc[:,"Bao_lâu_không_mua"] = df_export_display["Bao_lâu_không_mua"].fillna("")
+
+df_export_display["Bao_lâu_không_mua"] = (
+    df_export_display["Bao_lâu_không_mua"]
+        .astype("string")   # Ép cột sang kiểu chuỗi
+        .fillna("")         # Rồi mới thay NaN bằng ""
+)
+
 st.dataframe(df_export_display, width="stretch")
 
 st.download_button(
@@ -271,6 +277,7 @@ st.download_button(
     file_name="customer_marketing.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
 
 # =========================
 # PARETO KH THEO CỬA HÀNG
