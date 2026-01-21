@@ -1,45 +1,24 @@
+# pages/00_general_report.py
+
 import pandas as pd
 import numpy as np
 import streamlit as st
 from io import BytesIO
 from datetime import datetime
 
-from load_data import get_active_data, set_active_data, first_purchase  # dùng chung parquet
-
-# =====================================================
-# Helper: Đọc & gộp nhiều file parquet upload
-# =====================================================
-@st.cache_data(show_spinner="📦 Đang đọc file parquet upload...")
-def load_parquet_from_upload(files):
-    if not files:
-        return pd.DataFrame()
-
-    dfs = []
-    for f in files:
-        d = pd.read_parquet(f)
-        dfs.append(d)
-
-    df = pd.concat(dfs, ignore_index=True)
-
-    # Chuẩn hoá cột Ngày
-    if "Ngày" in df.columns:
-        df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
-        df = df.dropna(subset=["Ngày"])
-
-    return df
-
+from load_data import get_active_data, set_active_data, first_purchase
 
 # =====================================================
 # Utils
 # =====================================================
-def to_excel(df):
+def to_excel(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Data")
     return output.getvalue()
 
 
-def fix_float(df, cols):
+def fix_float(df: pd.DataFrame, cols) -> pd.DataFrame:
     for c in cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
@@ -80,117 +59,116 @@ with st.sidebar:
 
 # Xử lý lựa chọn nguồn
 if src_choice == "Upload file parquet từ máy" and uploaded_files:
-    df_up = load_parquet_from_upload(uploaded_files)
+    # KHÔNG cache để tránh giữ nhiều bản copy
+    dfs = [pd.read_parquet(f) for f in uploaded_files]
+    df_up = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
     if df_up.empty:
         st.warning("⚠ File parquet upload không có dữ liệu hợp lệ. Vẫn giữ dữ liệu cũ.")
     else:
         set_active_data(df_up, source="upload")
-        st.success(f"✅ Đã cập nhật dữ liệu từ {len(uploaded_files)} file parquet upload")
+        st.success(
+            f"✅ Đã cập nhật dữ liệu từ {len(uploaded_files)} file parquet upload"
+        )
 
 elif src_choice == "Quay lại dữ liệu mặc định":
-    # Xoá active_df để get_active_data() tự load lại parquet mặc định
     if "active_df" in st.session_state:
         del st.session_state["active_df"]
     _ = get_active_data()
     st.success("↩ Đã quay lại dùng dữ liệu mặc định trên server")
 
-# Sau khi có thể đã thay đổi, luôn lấy lại dữ liệu đang active
+# Luôn lấy lại dữ liệu đang active
 df = get_active_data()
-
-# Hiển thị nguồn đang dùng
 st.sidebar.caption(
     "🔎 Đang dùng nguồn: **{}**".format(
         st.session_state.get("active_source", "default")
     )
 )
 
+# Bảo đảm cột Ngày chuẩn
+if "Ngày" in df.columns:
+    df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+    df = df.dropna(subset=["Ngày"])
+
+if df.empty:
+    st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
+    st.stop()
+
 # =====================================================
-# SIDEBAR FILTER
+# SIDEBAR FILTER (có liên kết Brand → Region → Cửa hàng)
 # =====================================================
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
-    time_type = st.selectbox("Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"])
-
-    start_date = st.date_input("Từ ngày", df["Ngày"].min())
-    end_date   = st.date_input("Đến ngày", df["Ngày"].max())
-
-    # ----- Brand -----
-    brand_options = sorted(df["Brand"].dropna().unique())
-    brand_raw = st.multiselect(
-        "Brand",
-        ["All"] + brand_options,
-        default=["All"]
+    time_type = st.selectbox(
+        "Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"]
     )
 
-    # danh sách Brand thực sự được chọn (để build Region)
-    brand_for_region = brand_options if (not brand_raw or "All" in brand_raw) else brand_raw
-    df_for_region = df[df["Brand"].isin(brand_for_region)]
+    start_date = st.date_input("Từ ngày", df["Ngày"].min().date())
+    end_date = st.date_input("Đến ngày", df["Ngày"].max().date())
 
-    # ----- Region phụ thuộc Brand -----
-    region_options = sorted(df_for_region["Region"].dropna().unique())
-    region_raw = st.multiselect(
-        "Region",
-        ["All"] + region_options,
-        default=["All"]
+    # Loại CT độc lập
+    all_loaiCT = sorted(df["LoaiCT"].dropna().unique())
+    loaiCT_filter = st.multiselect(
+        "Loại CT", all_loaiCT, default=all_loaiCT
     )
 
-    # danh sách Region thực sự được chọn (để build Store)
-    region_for_store = region_options if (not region_raw or "All" in region_raw) else region_raw
-    df_for_store = df_for_region[df_for_region["Region"].isin(region_for_store)]
-
-    # ----- Cửa hàng phụ thuộc Brand + Region -----
-    store_options = sorted(df_for_store["Điểm_mua_hàng"].dropna().unique())
-    store_raw = st.multiselect(
-        "Cửa hàng",
-        ["All"] + store_options,
-        default=["All"]
+    # Cascading Brand -> Region -> Cửa hàng
+    all_brand = sorted(df["Brand"].dropna().unique())
+    brand_filter = st.multiselect(
+        "Brand", all_brand, default=all_brand
     )
 
-    # Loại CT (không phụ thuộc)
-    loaiCT_options = sorted(df["LoaiCT"].dropna().unique())
-    loaiCT_raw = st.multiselect(
-        "Loại CT",
-        ["All"] + loaiCT_options
+    df_brand = df[df["Brand"].isin(brand_filter)]
+
+    all_region = sorted(df_brand["Region"].dropna().unique())
+    region_filter = st.multiselect(
+        "Region", all_region, default=all_region
     )
 
-# =====================================================
-# CLEAN FILTER
-# =====================================================
-def clean_filter(values, all_values):
-    if (not values) or ("All" in values):
-        return all_values
-    return values
+    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)]
 
-loaiCT_filter = clean_filter(loaiCT_raw, loaiCT_options)
-brand_filter  = clean_filter(brand_raw,  brand_options)
-region_filter = clean_filter(region_raw, region_options)
-store_filter  = clean_filter(store_raw,  store_options)
+    all_store = sorted(df_brand_region["Điểm_mua_hàng"].dropna().unique())
+    store_filter = st.multiselect(
+        "Cửa hàng", all_store, default=all_store
+    )
 
 # =====================================================
 # APPLY FILTER
 # =====================================================
-@st.cache_data(show_spinner=False)
-def apply_filters(df, start_date, end_date, loaiCT, brand, region, store):
-    return df[
-        (df["Ngày"] >= start_date) &
-        (df["Ngày"] <= end_date) &
-        (df["LoaiCT"].isin(loaiCT)) &
-        (df["Brand"].isin(brand)) &
-        (df["Region"].isin(region)) &
-        (df["Điểm_mua_hàng"].isin(store))
-    ]
+def apply_filters(
+    df: pd.DataFrame,
+    start_date,
+    end_date,
+    loaiCT,
+    brand,
+    region,
+    store,
+) -> pd.DataFrame:
+    mask = (
+        (df["Ngày"] >= pd.to_datetime(start_date))
+        & (df["Ngày"] <= pd.to_datetime(end_date))
+        & (df["LoaiCT"].isin(loaiCT))
+        & (df["Brand"].isin(brand))
+        & (df["Region"].isin(region))
+        & (df["Điểm_mua_hàng"].isin(store))
+    )
+    return df.loc[mask]
+
 
 df_f = apply_filters(
     df,
-    pd.to_datetime(start_date),
-    pd.to_datetime(end_date),
+    start_date,
+    end_date,
     loaiCT_filter,
     brand_filter,
     region_filter,
     store_filter,
 )
 
+if df_f.empty:
+    st.warning("⚠ Không có dữ liệu sau khi áp bộ lọc.")
+    st.stop()
 
 # =====================================================
 # TIME COLUMN
@@ -199,7 +177,7 @@ df_f_time = df_f.copy()
 if time_type == "Ngày":
     df_f_time["Time"] = df_f_time["Ngày"].dt.date
 elif time_type == "Tuần":
-    iso = df_f_time["Ngày"].dt.isocalendar()  # year, week, day
+    iso = df_f_time["Ngày"].dt.isocalendar()
     df_f_time["Time"] = (
         "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
     )
@@ -229,8 +207,7 @@ c5.metric("Khách hàng", customers)
 # =====================================================
 # TIME GROUP
 # =====================================================
-@st.cache_data(show_spinner=False)
-def group_time(df_f, time_type):
+def group_time(df_f: pd.DataFrame, time_type: str) -> pd.DataFrame:
     freq_map = {"Ngày": "D", "Tuần": "W", "Tháng": "ME", "Quý": "Q", "Năm": "Y"}
     d = (
         df_f.set_index("Ngày")
@@ -251,7 +228,6 @@ def group_time(df_f, time_type):
     return d
 
 
-df_time = fix_float(df_f, ["Tổng_Gross", "Tổng_Net"])
 df_time = group_time(df_f, time_type)
 df_time = fix_float(df_time, ["CK_%", "Growth_%"])
 
@@ -261,8 +237,7 @@ st.dataframe(df_time, width="stretch")
 # =====================================================
 # REGION + TIME
 # =====================================================
-@st.cache_data(show_spinner=False)
-def group_region_time(df):
+def group_region_time(df: pd.DataFrame) -> pd.DataFrame:
     d = (
         df.groupby(["Time", "Region"])
         .agg(
@@ -273,7 +248,9 @@ def group_region_time(df):
         )
         .reset_index()
     )
-    d["CK_%"] = np.where(d["Gross"] > 0, (d["Gross"] - d["Net"]) / d["Gross"] * 100, 0)
+    d["CK_%"] = np.where(
+        d["Gross"] > 0, (d["Gross"] - d["Net"]) / d["Gross"] * 100, 0
+    )
     return d.sort_values(["Time", "Net"], ascending=[True, False])
 
 

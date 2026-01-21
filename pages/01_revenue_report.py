@@ -1,15 +1,16 @@
+# pages/01_revenue_report.py
+
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-from load_data import get_active_data # dùng chung dữ liệu Parquet
+from load_data import get_active_data
 
 # =====================================================
 # CONFIG
 # =====================================================
 st.set_page_config(page_title="📈 Báo cáo Doanh thu", layout="wide")
 st.title("📈 Báo cáo Doanh thu")
-
 
 # =====================================================
 # LẤY DỮ LIỆU HIỆN HÀNH
@@ -28,17 +29,9 @@ if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
     st.stop()
 
-
-
 # =====================================================
-# SIDEBAR FILTER (Brand → Region → Cửa hàng phụ thuộc)
+# SIDEBAR FILTER (có liên kết Brand → Region → Điểm mua hàng)
 # =====================================================
-
-# Các list độc lập
-loaict_options   = sorted(df["LoaiCT"].dropna().unique())
-checksdt_options = sorted(df["Trạng_thái_số_điện_thoại"].dropna().unique())
-checkten_options = sorted(df["Kiểm_tra_tên"].dropna().unique())
-
 with st.sidebar:
     st.header("🎛 Bộ lọc dữ liệu")
 
@@ -59,86 +52,65 @@ with st.sidebar:
         key="rev_end_date",
     )
 
-    # ====== Brand (gốc) ======
-    brand_all = sorted(df["Brand"].dropna().unique())
-    brand_raw = st.multiselect(
-        "Brand",
-        ["Tất cả"] + brand_all,
-        default=["Tất cả"],
-        key="rev_brand",
+    # Loại CT độc lập
+    all_loaict = sorted(df["LoaiCT"].dropna().unique())
+    loaict_filter = st.multiselect(
+        "LoaiCT", all_loaict, default=all_loaict, key="rev_loaict"
     )
 
-    # Brand thực sự được chọn để lọc Region
-    brand_selected = brand_all if (not brand_raw or "Tất cả" in brand_raw) else brand_raw
-    df_for_region = df[df["Brand"].isin(brand_selected)]
-
-    # ====== Region phụ thuộc Brand ======
-    region_all = sorted(df_for_region["Region"].dropna().unique())
-    region_raw = st.multiselect(
-        "Region",
-        ["Tất cả"] + region_all,
-        default=["Tất cả"],
-        key="rev_region",
+    # Brand -> Region -> Điểm mua hàng
+    all_brands = sorted(df["Brand"].dropna().unique())
+    brand_filter = st.multiselect(
+        "Brand", all_brands, default=all_brands, key="rev_brand"
     )
 
-    region_selected = region_all if (not region_raw or "Tất cả" in region_raw) else region_raw
-    df_for_store = df_for_region[df_for_region["Region"].isin(region_selected)]
+    df_b = df[df["Brand"].isin(brand_filter)]
 
-    # ====== Cửa hàng phụ thuộc Brand + Region ======
-    store_all = sorted(df_for_store["Điểm_mua_hàng"].dropna().unique())
-    store_raw = st.multiselect(
-        "Điểm mua hàng",
-        ["Tất cả"] + store_all,
-        default=["Tất cả"],
-        key="rev_store",
+    all_regions = sorted(df_b["Region"].dropna().unique())
+    region_filter = st.multiselect(
+        "Region", all_regions, default=all_regions, key="rev_region"
     )
 
-    # ====== Các filter khác (không phụ thuộc) ======
-    loaict_raw = st.multiselect(
-        "LoaiCT",
-        ["Tất cả"] + loaict_options,
-        default=["Tất cả"],
-        key="rev_loaict",
+    df_br = df_b[df_b["Region"].isin(region_filter)]
+
+    all_stores = sorted(df_br["Điểm_mua_hàng"].dropna().unique())
+    store_filter = st.multiselect(
+        "Điểm mua hàng", all_stores, default=all_stores, key="rev_store"
     )
-    checksdt_raw = st.multiselect(
+
+    # Check SĐT & Kiểm tra tên
+    all_checksdt = sorted(df["Trạng_thái_số_điện_thoại"].dropna().unique())
+    checksdt_filter = st.multiselect(
         "Trạng_thái_số_điện_thoại",
-        ["Tất cả"] + checksdt_options,
-        default=["Tất cả"],
+        all_checksdt,
+        default=all_checksdt,
         key="rev_checksdt",
     )
-    checkten_raw = st.multiselect(
+
+    all_checkten = sorted(df["Kiểm_tra_tên"].dropna().unique())
+    checkten_filter = st.multiselect(
         "Kiểm_tra_tên",
-        ["Tất cả"] + checkten_options,
-        default=["Tất cả"],
+        all_checkten,
+        default=all_checkten,
         key="rev_checkten",
     )
 
-# ---------- Hàm xử lý "Tất cả" ----------
-def clean_filter(values, all_values):
-    if (not values) or ("Tất cả" in values):
-        return all_values
-    return values
-
-brand_filter   = clean_filter(brand_raw,   brand_all)
-region_filter  = clean_filter(region_raw,  region_all)
-store_filter   = clean_filter(store_raw,   store_all)
-loaict_filter  = clean_filter(loaict_raw,  loaict_options)
-checksdt_filter = clean_filter(checksdt_raw, checksdt_options)
-checkten_filter = clean_filter(checkten_raw, checkten_options)
-
-# ---------- Lọc dữ liệu ----------
+# Lọc dữ liệu
 mask = (
     (df["Ngày"] >= pd.to_datetime(start_date))
     & (df["Ngày"] <= pd.to_datetime(end_date))
+    & (df["LoaiCT"].isin(loaict_filter))
     & (df["Brand"].isin(brand_filter))
     & (df["Region"].isin(region_filter))
     & (df["Điểm_mua_hàng"].isin(store_filter))
-    & (df["LoaiCT"].isin(loaict_filter))
     & (df["Trạng_thái_số_điện_thoại"].isin(checksdt_filter))
     & (df["Kiểm_tra_tên"].isin(checkten_filter))
 )
-
 df_filtered = df.loc[mask].copy()
+
+if df_filtered.empty:
+    st.warning("⚠ Không có dữ liệu sau khi áp bộ lọc.")
+    st.stop()
 
 # =====================================================
 # HELPER FUNCTIONS
@@ -202,11 +174,9 @@ def top_bottom_store(
     grain: str,
     top: bool = True,
     year=None,
-    key=None
+    key=None,
 ) -> pd.DataFrame:
-    """
-    Top/Bottom 10 Điểm_mua_hàng theo Tổng_Net ở 1 kỳ cụ thể (ngày / tuần / tháng / quý).
-    """
+    """Top/Bottom 10 Điểm_mua_hàng theo Tổng_Net ở 1 kỳ cụ thể."""
     if df_in.empty:
         return pd.DataFrame()
 
@@ -214,8 +184,7 @@ def top_bottom_store(
     group_cols_store = ["Điểm_mua_hàng"] + group_cols
 
     grouped = (
-        df_store
-        .groupby(group_cols_store, as_index=False)[["Tổng_Gross", "Tổng_Net"]]
+        df_store.groupby(group_cols_store, as_index=False)[["Tổng_Gross", "Tổng_Net"]]
         .sum()
     )
 
@@ -229,29 +198,22 @@ def top_bottom_store(
         (grouped["Tổng_Net"] - grouped["Prev"]) / grouped["Prev"] * 100
     ).where(grouped["Prev"].notna() & (grouped["Prev"] != 0))
 
-    # ----------- CHỌN KỲ ĐỂ XEM ----------- #
+    # ----------- CHỌN KỲ ĐỂ XEM -----------
     if grain == "Ngày":
-        # Key là datetime.date => chỉ cần so sánh theo Key
         sel_key = key if key is not None else grouped["Key"].max()
         mask = grouped["Key"] == sel_key
     else:
-        # chắc chắn có Year
-        if year is None or key is None:
+        if (year is None) or (key is None):
             sel_year = grouped["Year"].max()
-            sel_key = grouped[grouped["Year"] == sel_year]["Key"].max()
+            sel_key = grouped.query("Year == @sel_year")["Key"].max()
         else:
             sel_year = year
             sel_key = key
         mask = (grouped["Year"] == sel_year) & (grouped["Key"] == sel_key)
 
     latest = grouped.loc[mask].copy()
-    if latest.empty:
-        return latest
-
     latest = latest.sort_values("Tổng_Net", ascending=not top).head(10)
     return latest
-
-
 
 
 # =====================================================
@@ -302,7 +264,6 @@ st.subheader("🌍 Doanh thu theo Region")
 if df_filtered.empty:
     st.info("Không có dữ liệu sau khi lọc.")
 else:
-    # Gom dữ liệu theo Region + kỳ thời gian
     df_region, group_cols = add_time_key(df_filtered, time_grain)
     group_cols_region = ["Region"] + group_cols
 
@@ -320,8 +281,7 @@ else:
         100 * (1 - grouped_region["Tổng_Net"] / grouped_region["Tổng_Gross"])
     ).where(grouped_region["Tổng_Gross"] != 0, 0)
 
-    # Tính kỳ trước theo từng Region
-    grouped_region = grouped_region.sort_values(["Region"] + group_cols)
+    grouped_region = grouped_region.sort_values(["Region"] + group_cols_region[1:])
     for col in ["Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng"]:
         prev_col = f"Prev_{col}"
         pct_col = f"%_So_sánh_{col}"
@@ -335,48 +295,20 @@ else:
             & (grouped_region[prev_col] != 0)
         )
 
-    # -----------------------------
-    # TẠO LABEL KỲ ĐỂ CHỌN (Tuần / Tháng / Quý / Ngày)
-    # -----------------------------
     if time_grain == "Ngày":
-        grouped_region["Kỳ"] = grouped_region["Key"].astype(str)
-        label_name = "ngày"
-    elif time_grain == "Tuần":
-        grouped_region["Kỳ"] = (
-            grouped_region["Year"].astype(str)
-            + "-W"
-            + grouped_region["Key"].astype(int).astype(str).str.zfill(2)
+        latest_key = grouped_region["Key"].max()
+        latest_mask = grouped_region["Key"] == latest_key
+    else:
+        latest_year = grouped_region["Year"].max()
+        latest_key = grouped_region.query("Year == @latest_year")["Key"].max()
+        latest_mask = (grouped_region["Year"] == latest_year) & (
+            grouped_region["Key"] == latest_key
         )
-        label_name = "tuần"
-    elif time_grain == "Tháng":
-        grouped_region["Kỳ"] = (
-            grouped_region["Year"].astype(str)
-            + "-"
-            + grouped_region["Key"].astype(int).astype(str).str.zfill(2)
-        )
-        label_name = "tháng"
-    else:  # "Quý"
-        grouped_region["Kỳ"] = (
-            grouped_region["Year"].astype(str)
-            + "-Q"
-            + grouped_region["Key"].astype(int).astype(str)
-        )
-        label_name = "quý"
 
-    period_options = sorted(grouped_region["Kỳ"].unique())
-    default_idx = len(period_options) - 1 if period_options else 0
-
-    selected_period = st.selectbox(
-        f"Chọn {label_name} để xem bảng Region",
-        options=period_options,
-        index=default_idx,
-        key="region_period_filter",
-    )
-
-    df_region_view = grouped_region[grouped_region["Kỳ"] == selected_period].copy()
+    df_region_latest = grouped_region.loc[latest_mask].copy()
 
     st.data_editor(
-        df_region_view,
+        df_region_latest,
         width="stretch",
         hide_index=True,
         column_config={
@@ -390,127 +322,106 @@ else:
         },
     )
 
-
 # =====================================================
 # STORE TOP / BOTTOM (có chọn kỳ)
 # =====================================================
 st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 
-if df_filtered.empty:
-    st.info("Không có dữ liệu sau khi lọc.")
-else:
-    # Tạo danh sách kỳ (Year/Key) có trong data
-    df_store_key, group_cols = add_time_key(df_filtered, time_grain)
+# Tạo danh sách kỳ để chọn (dùng df_summary để tránh tính lại)
+if not df_summary.empty:
+    period_df = df_summary[["Year", "Key"]].drop_duplicates().copy()
+
+    # Tạo label đẹp
+    if time_grain == "Ngày":
+        period_df["label"] = period_df["Key"].astype(str)
+    elif time_grain == "Tuần":
+        period_df["label"] = period_df.apply(
+            lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}", axis=1
+        )
+    elif time_grain == "Tháng":
+        period_df["label"] = period_df.apply(
+            lambda r: f"{int(r['Year'])}-{int(r['Key']):02d}", axis=1
+        )
+    elif time_grain == "Quý":
+        period_df["label"] = period_df.apply(
+            lambda r: f"Q{int(r['Key'])} {int(r['Year'])}", axis=1
+        )
+    else:
+        period_df["label"] = period_df["Year"].astype(str)
+
+    period_df = period_df.sort_values(["Year", "Key"])
+
+    st.markdown("### 🔍 Chọn kỳ để xem Top/Bottom")
+    sel_label = st.selectbox(
+        "Kỳ thời gian",
+        options=period_df["label"].tolist(),
+        index=len(period_df) - 1,
+    )
+
+    row_sel = period_df.loc[period_df["label"] == sel_label].iloc[0]
+    sel_year = int(row_sel["Year"]) if "Year" in row_sel else None
+    sel_key = row_sel["Key"]
 
     if time_grain == "Ngày":
-        period_df = (
-            df_store_key[["Key"]]
-            .drop_duplicates()
-            .sort_values("Key")
-        )
-        # Key là datetime.date -> đổi sang chuỗi dd/mm/yyyy để chọn
-        period_df["label"] = pd.to_datetime(period_df["Key"]).dt.strftime("%d/%m/%Y")
+        top10 = top_bottom_store(df_filtered, time_grain, top=True, key=sel_key)
+        bottom10 = top_bottom_store(df_filtered, time_grain, top=False, key=sel_key)
     else:
-        period_df = (
-            df_store_key[["Year", "Key"]]
-            .drop_duplicates()
-            .sort_values(["Year", "Key"])
-        )
-
-        if time_grain == "Tuần":
-            period_df["label"] = period_df.apply(
-                lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}",
-                axis=1,
-            )
-        elif time_grain == "Tháng":
-            period_df["label"] = period_df.apply(
-                lambda r: f"Tháng {int(r['Key']):02d}/{int(r['Year'])}",
-                axis=1,
-            )
-        elif time_grain == "Quý":
-            period_df["label"] = period_df.apply(
-                lambda r: f"Q{int(r['Key'])}/{int(r['Year'])}",
-                axis=1,
-            )
-
-    if period_df.empty:
-        st.info("Không có kỳ nào để hiển thị Top/Bottom.")
-    else:
-        # mặc định chọn kỳ mới nhất (dòng cuối)
-        default_idx = len(period_df) - 1
-        sel_label = st.selectbox(
-            "🕒 Chọn kỳ để xem Top/Bottom",
-            options=period_df["label"],
-            index=default_idx,
-            key="store_period_select",
-        )
-        sel_row = period_df.loc[period_df["label"] == sel_label].iloc[0]
-        sel_key = sel_row["Key"]
-        sel_year = int(sel_row["Year"]) if "Year" in sel_row.index else None
-
-        # Lấy Top & Bottom theo kỳ đã chọn
-        df_top10 = top_bottom_store(
+        top10 = top_bottom_store(
             df_filtered, time_grain, top=True, year=sel_year, key=sel_key
         )
-        df_bottom10 = top_bottom_store(
+        bottom10 = top_bottom_store(
             df_filtered, time_grain, top=False, year=sel_year, key=sel_key
         )
+else:
+    top10 = pd.DataFrame()
+    bottom10 = pd.DataFrame()
 
-        col1, col2 = st.columns(2)
+col1, col2 = st.columns(2)
 
-        with col1:
-            st.markdown("### 🏆 Top 10 Điểm mua hàng")
-            if df_top10.empty:
-                st.info("Không có dữ liệu.")
-            else:
-                st.data_editor(
-                    df_top10,
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Tổng_Gross": st.column_config.NumberColumn(
-                            "Gross", format="%.0f"
-                        ),
-                        "Tổng_Net": st.column_config.NumberColumn(
-                            "Net", format="%.0f"
-                        ),
-                        "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
-                            "Tỷ lệ CK (%)", format="%.2f"
-                        ),
-                        "Prev": st.column_config.NumberColumn(
-                            "Net kỳ trước", format="%.0f"
-                        ),
-                        "Change%": st.column_config.NumberColumn(
-                            "Tăng/giảm (%)", format="%.2f"
-                        ),
-                    },
-                )
+with col1:
+    st.markdown("### 🏆 Top 10 Điểm mua hàng")
+    if top10.empty:
+        st.info("Không có dữ liệu.")
+    else:
+        st.data_editor(
+            top10,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Tổng_Gross": st.column_config.NumberColumn("Gross", format="%.0f"),
+                "Tổng_Net": st.column_config.NumberColumn("Net", format="%.0f"),
+                "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
+                    "Tỷ lệ CK (%)", format="%.2f"
+                ),
+                "Prev": st.column_config.NumberColumn(
+                    "Net kỳ trước", format="%.0f"
+                ),
+                "Change%": st.column_config.NumberColumn(
+                    "Tăng/giảm (%)", format="%.2f"
+                ),
+            },
+        )
 
-        with col2:
-            st.markdown("### 📉 Bottom 10 Điểm mua hàng")
-            if df_bottom10.empty:
-                st.info("Không có dữ liệu.")
-            else:
-                st.data_editor(
-                    df_bottom10,
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Tổng_Gross": st.column_config.NumberColumn(
-                            "Gross", format="%.0f"
-                        ),
-                        "Tổng_Net": st.column_config.NumberColumn(
-                            "Net", format="%.0f"
-                        ),
-                        "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
-                            "Tỷ lệ CK (%)", format="%.2f"
-                        ),
-                        "Prev": st.column_config.NumberColumn(
-                            "Net kỳ trước", format="%.0f"
-                        ),
-                        "Change%": st.column_config.NumberColumn(
-                            "Tăng/giảm (%)", format="%.2f"
-                        ),
-                    },
-                )
-
+with col2:
+    st.markdown("### 📉 Bottom 10 Điểm mua hàng")
+    if bottom10.empty:
+        st.info("Không có dữ liệu.")
+    else:
+        st.data_editor(
+            bottom10,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Tổng_Gross": st.column_config.NumberColumn("Gross", format="%.0f"),
+                "Tổng_Net": st.column_config.NumberColumn("Net", format="%.0f"),
+                "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
+                    "Tỷ lệ CK (%)", format="%.2f"
+                ),
+                "Prev": st.column_config.NumberColumn(
+                    "Net kỳ trước", format="%.0f"
+                ),
+                "Change%": st.column_config.NumberColumn(
+                    "Tăng/giảm (%)", format="%.2f"
+                ),
+            },
+        )
