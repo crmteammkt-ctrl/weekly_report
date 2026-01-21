@@ -197,8 +197,10 @@ def summarize_revenue(df_in: pd.DataFrame, grain: str) -> pd.DataFrame:
     return summary
 
 
-def top_bottom_store(df_in: pd.DataFrame, grain: str, top: bool = True) -> pd.DataFrame:
-    """Top/Bottom 10 Điểm_mua_hàng theo Tổng_Net ở kỳ mới nhất."""
+def top_bottom_store(df_in: pd.DataFrame, grain: str,
+                     top: bool = True,
+                     year=None, key=None) -> pd.DataFrame:
+    """Top/Bottom 10 Điểm_mua_hàng theo Tổng_Net ở 1 kỳ cụ thể (ngày / tuần / tháng / quý)."""
     if df_in.empty:
         return pd.DataFrame()
 
@@ -209,6 +211,7 @@ def top_bottom_store(df_in: pd.DataFrame, grain: str, top: bool = True) -> pd.Da
         df_store.groupby(group_cols_store, as_index=False)[["Tổng_Gross", "Tổng_Net"]]
         .sum()
     )
+
     grouped["Tỷ_lệ_CK (%)"] = (
         100 * (1 - grouped["Tổng_Net"] / grouped["Tổng_Gross"])
     ).where(grouped["Tổng_Gross"] != 0, 0)
@@ -219,18 +222,25 @@ def top_bottom_store(df_in: pd.DataFrame, grain: str, top: bool = True) -> pd.Da
         (grouped["Tổng_Net"] - grouped["Prev"]) / grouped["Prev"] * 100
     ).where(grouped["Prev"].notna() & (grouped["Prev"] != 0))
 
-    # Lấy kỳ mới nhất
+    # ----------- CHỌN KỲ ĐỂ XEM -----------
     if grain == "Ngày":
-        latest_key = grouped["Key"].max()
-        latest_mask = grouped["Key"] == latest_key
+        # nếu không truyền key thì mặc định ngày mới nhất
+        sel_key = key if key is not None else grouped["Key"].max()
+        mask = grouped["Key"] == sel_key
     else:
-        latest_year = grouped["Year"].max()
-        latest_key = grouped.query("Year == @latest_year")["Key"].max()
-        latest_mask = (grouped["Year"] == latest_year) & (grouped["Key"] == latest_key)
+        if (year is None) or (key is None):
+            # mặc định: năm & kỳ mới nhất
+            sel_year = grouped["Year"].max()
+            sel_key = grouped.query("Year == @sel_year")["Key"].max()
+        else:
+            sel_year = year
+            sel_key = key
+        mask = (grouped["Year"] == sel_year) & (grouped["Key"] == sel_key)
 
-    latest = grouped.loc[latest_mask].copy()
+    latest = grouped.loc[mask].copy()
     latest = latest.sort_values("Tổng_Net", ascending=not top).head(10)
     return latest
+
 
 
 # =====================================================
@@ -373,10 +383,61 @@ else:
 # =====================================================
 # STORE TOP / BOTTOM
 # =====================================================
+# =====================================================
+# CHỌN KỲ DÙNG CHO TOP/BOTTOM STORE
+# =====================================================
+store_year = None
+store_key = None
+
+if not df_filtered.empty and time_grain in ["Tuần", "Tháng", "Quý"]:
+    df_period, group_cols = add_time_key(df_filtered, time_grain)
+
+    period_df = (
+        df_period[group_cols]
+        .drop_duplicates()
+        .sort_values(group_cols)
+        .reset_index(drop=True)
+    )
+
+    # Tạo label đẹp để chọn
+    if time_grain == "Tuần":
+        period_df["label"] = period_df.apply(
+            lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}", axis=1
+        )
+    elif time_grain == "Tháng":
+        period_df["label"] = period_df.apply(
+            lambda r: f"Tháng {int(r['Key']):02d}/{int(r['Year'])}", axis=1
+        )
+    else:  # Quý
+        period_df["label"] = period_df.apply(
+            lambda r: f"Quý {int(r['Key'])}/{int(r['Year'])}", axis=1
+        )
+
+    # mặc định chọn kỳ cuối (mới nhất)
+    default_idx = len(period_df) - 1
+
+    selected_label = st.selectbox(
+        f"🔎 Chọn kỳ để xem Top/Bottom (theo {time_grain})",
+        options=period_df["label"].tolist(),
+        index=default_idx,
+        key="rev_store_period",
+    )
+
+    row = period_df[period_df["label"] == selected_label].iloc[0]
+    store_year = int(row["Year"])
+    store_key = int(row["Key"])
+
 st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 
-df_top10 = top_bottom_store(df_filtered, time_grain, top=True)
-df_bottom10 = top_bottom_store(df_filtered, time_grain, top=False)
+df_top10 = top_bottom_store(
+    df_filtered, time_grain, top=True,
+    year=store_year, key=store_key
+)
+df_bottom10 = top_bottom_store(
+    df_filtered, time_grain, top=False,
+    year=store_year, key=store_key
+)
+
 
 col1, col2 = st.columns(2)
 
