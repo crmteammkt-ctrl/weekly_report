@@ -329,27 +329,29 @@ st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 
 # Tạo danh sách kỳ để chọn (dùng df_summary để tránh tính lại)
 if not df_summary.empty:
-    period_df = df_summary[["Year", "Key"]].drop_duplicates().copy()
-
-    # Tạo label đẹp
+    # Với "Ngày" thì df_summary không có cột Year, nên xử lý riêng
     if time_grain == "Ngày":
+        period_df = df_summary[["Key"]].drop_duplicates().copy()
         period_df["label"] = period_df["Key"].astype(str)
-    elif time_grain == "Tuần":
-        period_df["label"] = period_df.apply(
-            lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}", axis=1
-        )
-    elif time_grain == "Tháng":
-        period_df["label"] = period_df.apply(
-            lambda r: f"{int(r['Year'])}-{int(r['Key']):02d}", axis=1
-        )
-    elif time_grain == "Quý":
-        period_df["label"] = period_df.apply(
-            lambda r: f"Q{int(r['Key'])} {int(r['Year'])}", axis=1
-        )
     else:
-        period_df["label"] = period_df["Year"].astype(str)
+        period_df = df_summary[["Year", "Key"]].drop_duplicates().copy()
 
-    period_df = period_df.sort_values(["Year", "Key"])
+        if time_grain == "Tuần":
+            period_df["label"] = period_df.apply(
+                lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}", axis=1
+            )
+        elif time_grain == "Tháng":
+            period_df["label"] = period_df.apply(
+                lambda r: f"{int(r['Year'])}-{int(r['Key']):02d}", axis=1
+            )
+        elif time_grain == "Quý":
+            period_df["label"] = period_df.apply(
+                lambda r: f"Q{int(r['Key'])} {int(r['Year'])}", axis=1
+            )
+        else:  # Năm
+            period_df["label"] = period_df["Year"].astype(str)
+
+    period_df = period_df.sort_values(["Key"] if time_grain == "Ngày" else ["Year", "Key"])
 
     st.markdown("### 🔍 Chọn kỳ để xem Top/Bottom")
     sel_label = st.selectbox(
@@ -359,8 +361,9 @@ if not df_summary.empty:
     )
 
     row_sel = period_df.loc[period_df["label"] == sel_label].iloc[0]
-    sel_year = int(row_sel["Year"]) if "Year" in row_sel else None
     sel_key = row_sel["Key"]
+    # Với "Ngày" không cần Year, các mode khác vẫn dùng Year như cũ
+    sel_year = int(row_sel["Year"]) if "Year" in row_sel.index else None
 
     if time_grain == "Ngày":
         top10 = top_bottom_store(df_filtered, time_grain, top=True, key=sel_key)
@@ -375,6 +378,7 @@ if not df_summary.empty:
 else:
     top10 = pd.DataFrame()
     bottom10 = pd.DataFrame()
+
 
 col1, col2 = st.columns(2)
 
