@@ -31,15 +31,13 @@ if df.empty:
 
 
 # =====================================================
-# SIDEBAR FILTER
+# SIDEBAR FILTER (Brand → Region → Cửa hàng phụ thuộc)
 # =====================================================
 
-brands   = sorted(df["Brand"].dropna().unique())
-regions  = sorted(df["Region"].dropna().unique())
-stores   = sorted(df["Điểm_mua_hàng"].dropna().unique())
-loaicts  = sorted(df["LoaiCT"].dropna().unique())
-checksdt = sorted(df["Trạng_thái_số_điện_thoại"].dropna().unique())
-checkten = sorted(df["Kiểm_tra_tên"].dropna().unique())
+# Các list độc lập
+loaict_options   = sorted(df["LoaiCT"].dropna().unique())
+checksdt_options = sorted(df["Trạng_thái_số_điện_thoại"].dropna().unique())
+checkten_options = sorted(df["Kiểm_tra_tên"].dropna().unique())
 
 with st.sidebar:
     st.header("🎛 Bộ lọc dữ liệu")
@@ -61,46 +59,74 @@ with st.sidebar:
         key="rev_end_date",
     )
 
-    brand_filter = st.multiselect(
-        "Brand", ["Tất cả"] + brands, default=["Tất cả"], key="rev_brand"
+    # ====== Brand (gốc) ======
+    brand_all = sorted(df["Brand"].dropna().unique())
+    brand_raw = st.multiselect(
+        "Brand",
+        ["Tất cả"] + brand_all,
+        default=["Tất cả"],
+        key="rev_brand",
     )
-    region_filter = st.multiselect(
-        "Region", ["Tất cả"] + regions, default=["Tất cả"], key="rev_region"
+
+    # Brand thực sự được chọn để lọc Region
+    brand_selected = brand_all if (not brand_raw or "Tất cả" in brand_raw) else brand_raw
+    df_for_region = df[df["Brand"].isin(brand_selected)]
+
+    # ====== Region phụ thuộc Brand ======
+    region_all = sorted(df_for_region["Region"].dropna().unique())
+    region_raw = st.multiselect(
+        "Region",
+        ["Tất cả"] + region_all,
+        default=["Tất cả"],
+        key="rev_region",
     )
-    store_filter = st.multiselect(
-        "Điểm mua hàng", ["Tất cả"] + stores, default=["Tất cả"], key="rev_store"
+
+    region_selected = region_all if (not region_raw or "Tất cả" in region_raw) else region_raw
+    df_for_store = df_for_region[df_for_region["Region"].isin(region_selected)]
+
+    # ====== Cửa hàng phụ thuộc Brand + Region ======
+    store_all = sorted(df_for_store["Điểm_mua_hàng"].dropna().unique())
+    store_raw = st.multiselect(
+        "Điểm mua hàng",
+        ["Tất cả"] + store_all,
+        default=["Tất cả"],
+        key="rev_store",
     )
-    loaict_filter = st.multiselect(
-        "LoaiCT", ["Tất cả"] + loaicts, default=["Tất cả"], key="rev_loaict"
+
+    # ====== Các filter khác (không phụ thuộc) ======
+    loaict_raw = st.multiselect(
+        "LoaiCT",
+        ["Tất cả"] + loaict_options,
+        default=["Tất cả"],
+        key="rev_loaict",
     )
-    checksdt_filter = st.multiselect(
+    checksdt_raw = st.multiselect(
         "Trạng_thái_số_điện_thoại",
-        ["Tất cả"] + checksdt,
+        ["Tất cả"] + checksdt_options,
         default=["Tất cả"],
         key="rev_checksdt",
     )
-    checkten_filter = st.multiselect(
+    checkten_raw = st.multiselect(
         "Kiểm_tra_tên",
-        ["Tất cả"] + checkten,
+        ["Tất cả"] + checkten_options,
         default=["Tất cả"],
         key="rev_checkten",
     )
 
-# Xử lý "Tất cả"
-if "Tất cả" in brand_filter:
-    brand_filter = brands
-if "Tất cả" in region_filter:
-    region_filter = regions
-if "Tất cả" in store_filter:
-    store_filter = stores
-if "Tất cả" in loaict_filter:
-    loaict_filter = loaicts
-if "Tất cả" in checksdt_filter:
-    checksdt_filter = checksdt
-if "Tất cả" in checkten_filter:
-    checkten_filter = checkten
+# ---------- Hàm xử lý "Tất cả" ----------
+def clean_filter(values, all_values):
+    if (not values) or ("Tất cả" in values):
+        return all_values
+    return values
 
-# Lọc dữ liệu
+brand_filter   = clean_filter(brand_raw,   brand_all)
+region_filter  = clean_filter(region_raw,  region_all)
+store_filter   = clean_filter(store_raw,   store_all)
+loaict_filter  = clean_filter(loaict_raw,  loaict_options)
+checksdt_filter = clean_filter(checksdt_raw, checksdt_options)
+checkten_filter = clean_filter(checkten_raw, checkten_options)
+
+# ---------- Lọc dữ liệu ----------
 mask = (
     (df["Ngày"] >= pd.to_datetime(start_date))
     & (df["Ngày"] <= pd.to_datetime(end_date))

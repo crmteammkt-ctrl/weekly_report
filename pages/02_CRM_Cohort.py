@@ -34,7 +34,7 @@ if "Ngày" in df.columns:
     df = df.dropna(subset=["Ngày"])
 
 # =====================================================
-# SIDEBAR FILTER
+# SIDEBAR FILTER (Brand → Region → Cửa hàng phụ thuộc)
 # =====================================================
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (CRM & Cohort)")
@@ -42,22 +42,59 @@ with st.sidebar:
     start_date = st.date_input("Từ ngày", df["Ngày"].min())
     end_date   = st.date_input("Đến ngày", df["Ngày"].max())
 
-    loaiCT_filter = st.multiselect("Loại CT", ["All"] + sorted(df["LoaiCT"].dropna().unique()))
-    brand_filter  = st.multiselect("Brand", ["All"] + sorted(df["Brand"].dropna().unique()))
-    region_filter = st.multiselect("Region", ["All"] + sorted(df["Region"].dropna().unique()))
-    store_filter  = st.multiselect("Cửa hàng", ["All"] + sorted(df["Điểm_mua_hàng"].dropna().unique()))
+    # ----- Loại CT (độc lập) -----
+    loaiCT_all = sorted(df["LoaiCT"].dropna().unique())
+    loaiCT_raw = st.multiselect(
+        "Loại CT",
+        ["All"] + loaiCT_all,
+        default=["All"],
+    )
 
-# clean "All"
+    # ----- Brand (gốc) -----
+    brand_all = sorted(df["Brand"].dropna().unique())
+    brand_raw = st.multiselect(
+        "Brand",
+        ["All"] + brand_all,
+        default=["All"],
+    )
+
+    # Brand thực tế để lọc Region
+    brand_selected = brand_all if (not brand_raw or "All" in brand_raw) else brand_raw
+    df_for_region = df[df["Brand"].isin(brand_selected)]
+
+    # ----- Region phụ thuộc Brand -----
+    region_all = sorted(df_for_region["Region"].dropna().unique())
+    region_raw = st.multiselect(
+        "Region",
+        ["All"] + region_all,
+        default=["All"],
+    )
+
+    region_selected = region_all if (not region_raw or "All" in region_raw) else region_raw
+    df_for_store = df_for_region[df_for_region["Region"].isin(region_selected)]
+
+    # ----- Cửa hàng phụ thuộc Brand + Region -----
+    store_all = sorted(df_for_store["Điểm_mua_hàng"].dropna().unique())
+    store_raw = st.multiselect(
+        "Cửa hàng",
+        ["All"] + store_all,
+        default=["All"],
+    )
+
+# ---------- Hàm xử lý "All" ----------
 def clean_filter(values, all_values):
     if not values or "All" in values:
         return all_values
     return values
 
-loaiCT_filter = clean_filter(loaiCT_filter, df["LoaiCT"].unique())
-brand_filter  = clean_filter(brand_filter,  df["Brand"].unique())
-region_filter = clean_filter(region_filter, df["Region"].unique())
-store_filter  = clean_filter(store_filter,  df["Điểm_mua_hàng"].unique())
+loaiCT_filter = clean_filter(loaiCT_raw, loaiCT_all)
+brand_filter  = clean_filter(brand_raw,  brand_all)
+region_filter = clean_filter(region_raw, region_all)
+store_filter  = clean_filter(store_raw,  store_all)
 
+# =====================================================
+# APPLY FILTER
+# =====================================================
 @st.cache_data(show_spinner=False)
 def apply_filters(df, start_date, end_date, loaiCT, brand, region, store):
     return df[
@@ -76,8 +113,9 @@ df_f = apply_filters(
     loaiCT_filter,
     brand_filter,
     region_filter,
-    store_filter
+    store_filter,
 )
+
 
 # ✅ Chặn trường hợp không có dữ liệu sau lọc
 if df_f.empty:
