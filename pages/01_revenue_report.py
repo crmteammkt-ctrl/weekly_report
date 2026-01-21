@@ -197,10 +197,16 @@ def summarize_revenue(df_in: pd.DataFrame, grain: str) -> pd.DataFrame:
     return summary
 
 
-def top_bottom_store(df_in: pd.DataFrame, grain: str,
-                     top: bool = True,
-                     year=None, key=None) -> pd.DataFrame:
-    """Top/Bottom 10 Điểm_mua_hàng theo Tổng_Net ở 1 kỳ cụ thể (ngày / tuần / tháng / quý)."""
+def top_bottom_store(
+    df_in: pd.DataFrame,
+    grain: str,
+    top: bool = True,
+    year=None,
+    key=None
+) -> pd.DataFrame:
+    """
+    Top/Bottom 10 Điểm_mua_hàng theo Tổng_Net ở 1 kỳ cụ thể (ngày / tuần / tháng / quý).
+    """
     if df_in.empty:
         return pd.DataFrame()
 
@@ -208,7 +214,8 @@ def top_bottom_store(df_in: pd.DataFrame, grain: str,
     group_cols_store = ["Điểm_mua_hàng"] + group_cols
 
     grouped = (
-        df_store.groupby(group_cols_store, as_index=False)[["Tổng_Gross", "Tổng_Net"]]
+        df_store
+        .groupby(group_cols_store, as_index=False)[["Tổng_Gross", "Tổng_Net"]]
         .sum()
     )
 
@@ -222,24 +229,28 @@ def top_bottom_store(df_in: pd.DataFrame, grain: str,
         (grouped["Tổng_Net"] - grouped["Prev"]) / grouped["Prev"] * 100
     ).where(grouped["Prev"].notna() & (grouped["Prev"] != 0))
 
-    # ----------- CHỌN KỲ ĐỂ XEM -----------
+    # ----------- CHỌN KỲ ĐỂ XEM ----------- #
     if grain == "Ngày":
-        # nếu không truyền key thì mặc định ngày mới nhất
+        # Key là datetime.date => chỉ cần so sánh theo Key
         sel_key = key if key is not None else grouped["Key"].max()
         mask = grouped["Key"] == sel_key
     else:
-        if (year is None) or (key is None):
-            # mặc định: năm & kỳ mới nhất
+        # chắc chắn có Year
+        if year is None or key is None:
             sel_year = grouped["Year"].max()
-            sel_key = grouped.query("Year == @sel_year")["Key"].max()
+            sel_key = grouped[grouped["Year"] == sel_year]["Key"].max()
         else:
             sel_year = year
             sel_key = key
         mask = (grouped["Year"] == sel_year) & (grouped["Key"] == sel_key)
 
     latest = grouped.loc[mask].copy()
+    if latest.empty:
+        return latest
+
     latest = latest.sort_values("Tổng_Net", ascending=not top).head(10)
     return latest
+
 
 
 
@@ -381,122 +392,125 @@ else:
 
 
 # =====================================================
-# STORE TOP / BOTTOM
+# STORE TOP / BOTTOM (có chọn kỳ)
 # =====================================================
-
-
 st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 
-# =====================================================
-# CHỌN KỲ DÙNG CHO TOP/BOTTOM STORE
-# =====================================================
-store_year = None
-store_key = None
+if df_filtered.empty:
+    st.info("Không có dữ liệu sau khi lọc.")
+else:
+    # Tạo danh sách kỳ (Year/Key) có trong data
+    df_store_key, group_cols = add_time_key(df_filtered, time_grain)
 
-if not df_filtered.empty and time_grain in ["Ngày","Tuần", "Tháng", "Quý"]:
-    df_period, group_cols = add_time_key(df_filtered, time_grain)
-
-    period_df = (
-        df_period[group_cols]
-        .drop_duplicates()
-        .sort_values(group_cols)
-        .reset_index(drop=True)
-    )
-
-    # Tạo label đẹp để chọn
     if time_grain == "Ngày":
-        period_df["label"] = period_df["Key"].astype(str)
-    elif time_grain == "Tuần":
-        period_df["label"] = period_df.apply(
-        lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}",
-        axis=1
-    )
-    elif time_grain == "Tháng":
-        period_df["label"] = period_df.apply(
-        lambda r: f"Tháng {int(r['Key']):02d}/{int(r['Year'])}",
-        axis=1
-    )
-    elif time_grain == "Quý":
-        period_df["label"] = period_df.apply(
-        lambda r: f"Q{int(r['Key'])}/{int(r['Year'])}",
-        axis=1
-    )
-
-
-    # mặc định chọn kỳ cuối (mới nhất)
-    default_idx = len(period_df) - 1
-
-    selected_label = st.selectbox(
-        f"🔎 Chọn kỳ để xem Top/Bottom (theo {time_grain})",
-        options=period_df["label"].tolist(),
-        index=default_idx,
-        key="rev_store_period",
-    )
-
-    row = period_df[period_df["label"] == selected_label].iloc[0]
-    store_year = int(row["Year"])
-    store_key = int(row["Key"])
-
-df_top10 = top_bottom_store(
-    df_filtered, time_grain, top=True,
-    year=store_year, key=store_key
-)
-df_bottom10 = top_bottom_store(
-    df_filtered, time_grain, top=False,
-    year=store_year, key=store_key
-)
-
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("### 🏆 Top 10 Điểm mua hàng")
-    if df_top10.empty:
-        st.info("Không có dữ liệu.")
+        period_df = (
+            df_store_key[["Key"]]
+            .drop_duplicates()
+            .sort_values("Key")
+        )
+        # Key là datetime.date -> đổi sang chuỗi dd/mm/yyyy để chọn
+        period_df["label"] = pd.to_datetime(period_df["Key"]).dt.strftime("%d/%m/%Y")
     else:
-        st.data_editor(
-            df_top10,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "Tổng_Gross": st.column_config.NumberColumn(
-                    "Gross", format="%.0f"
-                ),
-                "Tổng_Net": st.column_config.NumberColumn("Net", format="%.0f"),
-                "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
-                    "Tỷ lệ CK (%)", format="%.2f"
-                ),
-                "Prev": st.column_config.NumberColumn(
-                    "Net kỳ trước", format="%.0f"
-                ),
-                "Change%": st.column_config.NumberColumn(
-                    "Tăng/giảm (%)", format="%.2f"
-                ),
-            },
+        period_df = (
+            df_store_key[["Year", "Key"]]
+            .drop_duplicates()
+            .sort_values(["Year", "Key"])
         )
 
-with col2:
-    st.markdown("### 📉 Bottom 10 Điểm mua hàng")
-    if df_bottom10.empty:
-        st.info("Không có dữ liệu.")
+        if time_grain == "Tuần":
+            period_df["label"] = period_df.apply(
+                lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}",
+                axis=1,
+            )
+        elif time_grain == "Tháng":
+            period_df["label"] = period_df.apply(
+                lambda r: f"Tháng {int(r['Key']):02d}/{int(r['Year'])}",
+                axis=1,
+            )
+        elif time_grain == "Quý":
+            period_df["label"] = period_df.apply(
+                lambda r: f"Q{int(r['Key'])}/{int(r['Year'])}",
+                axis=1,
+            )
+
+    if period_df.empty:
+        st.info("Không có kỳ nào để hiển thị Top/Bottom.")
     else:
-        st.data_editor(
-            df_bottom10,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "Tổng_Gross": st.column_config.NumberColumn(
-                    "Gross", format="%.0f"
-                ),
-                "Tổng_Net": st.column_config.NumberColumn("Net", format="%.0f"),
-                "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
-                    "Tỷ lệ CK (%)", format="%.2f"
-                ),
-                "Prev": st.column_config.NumberColumn(
-                    "Net kỳ trước", format="%.0f"
-                ),
-                "Change%": st.column_config.NumberColumn(
-                    "Tăng/giảm (%)", format="%.2f"
-                ),
-            },
+        # mặc định chọn kỳ mới nhất (dòng cuối)
+        default_idx = len(period_df) - 1
+        sel_label = st.selectbox(
+            "🕒 Chọn kỳ để xem Top/Bottom",
+            options=period_df["label"],
+            index=default_idx,
+            key="store_period_select",
         )
+        sel_row = period_df.loc[period_df["label"] == sel_label].iloc[0]
+        sel_key = sel_row["Key"]
+        sel_year = int(sel_row["Year"]) if "Year" in sel_row.index else None
+
+        # Lấy Top & Bottom theo kỳ đã chọn
+        df_top10 = top_bottom_store(
+            df_filtered, time_grain, top=True, year=sel_year, key=sel_key
+        )
+        df_bottom10 = top_bottom_store(
+            df_filtered, time_grain, top=False, year=sel_year, key=sel_key
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### 🏆 Top 10 Điểm mua hàng")
+            if df_top10.empty:
+                st.info("Không có dữ liệu.")
+            else:
+                st.data_editor(
+                    df_top10,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Tổng_Gross": st.column_config.NumberColumn(
+                            "Gross", format="%.0f"
+                        ),
+                        "Tổng_Net": st.column_config.NumberColumn(
+                            "Net", format="%.0f"
+                        ),
+                        "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
+                            "Tỷ lệ CK (%)", format="%.2f"
+                        ),
+                        "Prev": st.column_config.NumberColumn(
+                            "Net kỳ trước", format="%.0f"
+                        ),
+                        "Change%": st.column_config.NumberColumn(
+                            "Tăng/giảm (%)", format="%.2f"
+                        ),
+                    },
+                )
+
+        with col2:
+            st.markdown("### 📉 Bottom 10 Điểm mua hàng")
+            if df_bottom10.empty:
+                st.info("Không có dữ liệu.")
+            else:
+                st.data_editor(
+                    df_bottom10,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Tổng_Gross": st.column_config.NumberColumn(
+                            "Gross", format="%.0f"
+                        ),
+                        "Tổng_Net": st.column_config.NumberColumn(
+                            "Net", format="%.0f"
+                        ),
+                        "Tỷ_lệ_CK (%)": st.column_config.NumberColumn(
+                            "Tỷ lệ CK (%)", format="%.2f"
+                        ),
+                        "Prev": st.column_config.NumberColumn(
+                            "Net kỳ trước", format="%.0f"
+                        ),
+                        "Change%": st.column_config.NumberColumn(
+                            "Tăng/giảm (%)", format="%.2f"
+                        ),
+                    },
+                )
+
