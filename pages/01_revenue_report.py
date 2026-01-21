@@ -281,6 +281,7 @@ st.subheader("🌍 Doanh thu theo Region")
 if df_filtered.empty:
     st.info("Không có dữ liệu sau khi lọc.")
 else:
+    # Gom dữ liệu theo Region + kỳ thời gian
     df_region, group_cols = add_time_key(df_filtered, time_grain)
     group_cols_region = ["Region"] + group_cols
 
@@ -298,7 +299,8 @@ else:
         100 * (1 - grouped_region["Tổng_Net"] / grouped_region["Tổng_Gross"])
     ).where(grouped_region["Tổng_Gross"] != 0, 0)
 
-    grouped_region = grouped_region.sort_values(["Region"] + group_cols_region[1:])
+    # Tính kỳ trước theo từng Region
+    grouped_region = grouped_region.sort_values(["Region"] + group_cols)
     for col in ["Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng"]:
         prev_col = f"Prev_{col}"
         pct_col = f"%_So_sánh_{col}"
@@ -312,20 +314,48 @@ else:
             & (grouped_region[prev_col] != 0)
         )
 
+    # -----------------------------
+    # TẠO LABEL KỲ ĐỂ CHỌN (Tuần / Tháng / Quý / Ngày)
+    # -----------------------------
     if time_grain == "Ngày":
-        latest_key = grouped_region["Key"].max()
-        latest_mask = grouped_region["Key"] == latest_key
-    else:
-        latest_year = grouped_region["Year"].max()
-        latest_key = grouped_region.query("Year == @latest_year")["Key"].max()
-        latest_mask = (grouped_region["Year"] == latest_year) & (
-            grouped_region["Key"] == latest_key
+        grouped_region["Kỳ"] = grouped_region["Key"].astype(str)
+        label_name = "ngày"
+    elif time_grain == "Tuần":
+        grouped_region["Kỳ"] = (
+            grouped_region["Year"].astype(str)
+            + "-W"
+            + grouped_region["Key"].astype(int).astype(str).str.zfill(2)
         )
+        label_name = "tuần"
+    elif time_grain == "Tháng":
+        grouped_region["Kỳ"] = (
+            grouped_region["Year"].astype(str)
+            + "-"
+            + grouped_region["Key"].astype(int).astype(str).str.zfill(2)
+        )
+        label_name = "tháng"
+    else:  # "Quý"
+        grouped_region["Kỳ"] = (
+            grouped_region["Year"].astype(str)
+            + "-Q"
+            + grouped_region["Key"].astype(int).astype(str)
+        )
+        label_name = "quý"
 
-    df_region_latest = grouped_region.loc[latest_mask].copy()
+    period_options = sorted(grouped_region["Kỳ"].unique())
+    default_idx = len(period_options) - 1 if period_options else 0
+
+    selected_period = st.selectbox(
+        f"Chọn {label_name} để xem bảng Region",
+        options=period_options,
+        index=default_idx,
+        key="region_period_filter",
+    )
+
+    df_region_view = grouped_region[grouped_region["Kỳ"] == selected_period].copy()
 
     st.data_editor(
-        df_region_latest,
+        df_region_view,
         width="stretch",
         hide_index=True,
         column_config={
@@ -338,6 +368,7 @@ else:
             ),
         },
     )
+
 
 # =====================================================
 # STORE TOP / BOTTOM
