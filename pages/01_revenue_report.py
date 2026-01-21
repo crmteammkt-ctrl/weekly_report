@@ -383,6 +383,10 @@ else:
 # =====================================================
 # STORE TOP / BOTTOM
 # =====================================================
+
+
+st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
+
 # =====================================================
 # CHỌN KỲ DÙNG CHO TOP/BOTTOM STORE
 # =====================================================
@@ -426,9 +430,7 @@ if not df_filtered.empty and time_grain in ["Tuần", "Tháng", "Quý"]:
     row = period_df[period_df["label"] == selected_label].iloc[0]
     store_year = int(row["Year"])
     store_key = int(row["Key"])
-
-st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
-
+    
 df_top10 = top_bottom_store(
     df_filtered, time_grain, top=True,
     year=store_year, key=store_key
