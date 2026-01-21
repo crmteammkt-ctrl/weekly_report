@@ -393,7 +393,7 @@ st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 store_year = None
 store_key = None
 
-if not df_filtered.empty and time_grain in ["Tuần", "Tháng", "Quý"]:
+if not df_filtered.empty and time_grain in ["Ngày","Tuần", "Tháng", "Quý"]:
     df_period, group_cols = add_time_key(df_filtered, time_grain)
 
     period_df = (
@@ -404,7 +404,11 @@ if not df_filtered.empty and time_grain in ["Tuần", "Tháng", "Quý"]:
     )
 
     # Tạo label đẹp để chọn
-    if time_grain == "Tuần":
+    if time_grain == "Ngày":
+        period_df["label"] = period_df.apply(
+            lambda r: f"Ngày {int(r['Key']):02d}/{int(r['Year'])}", axis=1
+        )
+    elif time_grain == "Tuần":
         period_df["label"] = period_df.apply(
             lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}", axis=1
         )
@@ -430,7 +434,7 @@ if not df_filtered.empty and time_grain in ["Tuần", "Tháng", "Quý"]:
     row = period_df[period_df["label"] == selected_label].iloc[0]
     store_year = int(row["Year"])
     store_key = int(row["Key"])
-    
+
 df_top10 = top_bottom_store(
     df_filtered, time_grain, top=True,
     year=store_year, key=store_key
