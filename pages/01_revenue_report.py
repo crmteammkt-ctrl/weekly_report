@@ -404,20 +404,20 @@ if not df_filtered.empty and time_grain in ["Ngày","Tuần", "Tháng", "Quý"]:
     )
 
     # Tạo label đẹp để chọn
-if time_grain == "Ngày":
-    period_df["label"] = period_df["Key"].astype(str)
-elif time_grain == "Tuần":
-    period_df["label"] = period_df.apply(
+    if time_grain == "Ngày":
+        period_df["label"] = period_df["Key"].astype(str)
+    elif time_grain == "Tuần":
+        period_df["label"] = period_df.apply(
         lambda r: f"Tuần {int(r['Key']):02d}/{int(r['Year'])}",
         axis=1
     )
-elif time_grain == "Tháng":
-    period_df["label"] = period_df.apply(
+    elif time_grain == "Tháng":
+        period_df["label"] = period_df.apply(
         lambda r: f"Tháng {int(r['Key']):02d}/{int(r['Year'])}",
         axis=1
     )
-elif time_grain == "Quý":
-    period_df["label"] = period_df.apply(
+    elif time_grain == "Quý":
+        period_df["label"] = period_df.apply(
         lambda r: f"Q{int(r['Key'])}/{int(r['Year'])}",
         axis=1
     )
