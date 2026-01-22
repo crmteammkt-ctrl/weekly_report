@@ -1,48 +1,46 @@
 # pages/00_general_report.py
-
 import pandas as pd
 import numpy as np
 import streamlit as st
 from io import BytesIO
-from datetime import datetime
 
-from load_data import get_active_data, set_active_data, first_purchase
+from load_data import get_active_data, set_active_data
 
 # =====================================================
-# Utils
+# FORMAT HELPERS (an toàn - không phụ thuộc Streamlit version)
 # =====================================================
-def to_excel(df: pd.DataFrame) -> bytes:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Data")
-    return output.getvalue()
+def fmt_int(x):
+    if pd.isna(x):
+        return ""
+    try:
+        return f"{float(x):,.0f}"
+    except:
+        return ""
 
+def fmt_pct(x, decimals=2, with_sign=False):
+    # x đang là 20.8 nghĩa là 20.8%
+    if pd.isna(x):
+        return ""
+    try:
+        v = float(x)
+        s = f"{v:,.{decimals}f}%"
+        if with_sign and v > 0:
+            s = "+" + s
+        return s
+    except:
+        return ""
 
-def fix_float(df: pd.DataFrame, cols) -> pd.DataFrame:
-    for c in cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+def ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
+    if "Ngày" in df.columns:
+        df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
+        df = df.dropna(subset=["Ngày"])
     return df
 
-def num_col(label: str, decimals: int = 0):
-    # d3-format: ",.0f" = có dấu phân tách hàng nghìn
-    return st.column_config.NumberColumn(label, format=f",.{decimals}f")
-
-def pct_col(label: str, decimals: int = 2):
-    # nếu CK_% đang là 20.8 (không phải 0.208) thì giữ dạng số thường
-    return st.column_config.NumberColumn(label, format=f".{decimals}f")
-
-
-def render_table(df_show: pd.DataFrame, col_cfg: dict, key: str | None = None):
-    # dùng dataframe cho nhẹ (không cần edit)
-    st.dataframe(
-        df_show,
-        use_container_width=True,
-        hide_index=True,
-        column_config=col_cfg,
-        key=key,
-    )
-
+def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    for c in ["Tổng_Gross", "Tổng_Net"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
 # =====================================================
 # Page config
@@ -58,11 +56,7 @@ with st.sidebar:
 
     src_choice = st.radio(
         "Nguồn dữ liệu (áp dụng cho tất cả trang)",
-        [
-            "Dùng dữ liệu hiện tại",
-            "Upload file parquet từ máy",
-            "Quay lại dữ liệu mặc định",
-        ],
+        ["Dùng dữ liệu hiện tại", "Upload file parquet từ máy", "Quay lại dữ liệu mặc định"],
         index=0,
         key="data_source_main",
     )
@@ -76,19 +70,28 @@ with st.sidebar:
             key="parquet_uploader_main",
         )
 
-# Xử lý lựa chọn nguồn
+# Xử lý upload / reset
 if src_choice == "Upload file parquet từ máy" and uploaded_files:
-    # KHÔNG cache để tránh giữ nhiều bản copy
-    dfs = [pd.read_parquet(f) for f in uploaded_files]
+    # KHÔNG cache để tránh giữ nhiều bản copy => giảm nguy cơ vượt RAM
+    dfs = []
+    for f in uploaded_files:
+        try:
+            dfs.append(pd.read_parquet(f))
+        except Exception as e:
+            st.warning(f"⚠ Không đọc được file: {getattr(f, 'name', 'unknown')} ({e})")
+
     df_up = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    df_up = ensure_datetime(df_up)
+    df_up = fix_numeric(df_up)
 
     if df_up.empty:
         st.warning("⚠ File parquet upload không có dữ liệu hợp lệ. Vẫn giữ dữ liệu cũ.")
     else:
         set_active_data(df_up, source="upload")
-        st.success(
-            f"✅ Đã cập nhật dữ liệu từ {len(uploaded_files)} file parquet upload"
-        )
+        st.success(f"✅ Đã cập nhật dữ liệu từ {len(uploaded_files)} file parquet upload")
+
+    # giải phóng tham chiếu list (giảm nguy cơ giữ RAM)
+    del dfs, df_up
 
 elif src_choice == "Quay lại dữ liệu mặc định":
     if "active_df" in st.session_state:
@@ -99,15 +102,11 @@ elif src_choice == "Quay lại dữ liệu mặc định":
 # Luôn lấy lại dữ liệu đang active
 df = get_active_data()
 st.sidebar.caption(
-    "🔎 Đang dùng nguồn: **{}**".format(
-        st.session_state.get("active_source", "default")
-    )
+    "🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default"))
 )
 
-# Bảo đảm cột Ngày chuẩn
-if "Ngày" in df.columns:
-    df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
-    df = df.dropna(subset=["Ngày"])
+df = ensure_datetime(df)
+df = fix_numeric(df)
 
 if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
@@ -119,71 +118,50 @@ if df.empty:
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
-    time_type = st.selectbox(
-        "Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"]
-    )
+    time_type = st.selectbox("Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"])
 
     start_date = st.date_input("Từ ngày", df["Ngày"].min().date())
-    end_date = st.date_input("Đến ngày", df["Ngày"].max().date())
+    end_date   = st.date_input("Đến ngày", df["Ngày"].max().date())
 
     # Loại CT độc lập
-    all_loaiCT = sorted(df["LoaiCT"].dropna().unique())
-    loaiCT_filter = st.multiselect(
-        "Loại CT", all_loaiCT, default=all_loaiCT
-    )
+    all_loaiCT = sorted(df["LoaiCT"].dropna().unique()) if "LoaiCT" in df.columns else []
+    loaiCT_filter = st.multiselect("Loại CT", all_loaiCT, default=all_loaiCT)
 
-    # Cascading Brand -> Region -> Cửa hàng
-    all_brand = sorted(df["Brand"].dropna().unique())
-    brand_filter = st.multiselect(
-        "Brand", all_brand, default=all_brand
-    )
+    # Cascading Brand -> Region -> Store
+    all_brand = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
+    brand_filter = st.multiselect("Brand", all_brand, default=all_brand)
 
-    df_brand = df[df["Brand"].isin(brand_filter)]
+    df_brand = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
 
-    all_region = sorted(df_brand["Region"].dropna().unique())
-    region_filter = st.multiselect(
-        "Region", all_region, default=all_region
-    )
+    all_region = sorted(df_brand["Region"].dropna().unique()) if "Region" in df_brand.columns else []
+    region_filter = st.multiselect("Region", all_region, default=all_region)
 
-    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)]
+    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if region_filter else df_brand.iloc[0:0]
 
-    all_store = sorted(df_brand_region["Điểm_mua_hàng"].dropna().unique())
-    store_filter = st.multiselect(
-        "Cửa hàng", all_store, default=all_store
-    )
+    all_store = sorted(df_brand_region["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_brand_region.columns else []
+    store_filter = st.multiselect("Cửa hàng", all_store, default=all_store)
 
 # =====================================================
 # APPLY FILTER
 # =====================================================
-def apply_filters(
-    df: pd.DataFrame,
-    start_date,
-    end_date,
-    loaiCT,
-    brand,
-    region,
-    store,
-) -> pd.DataFrame:
-    mask = (
-        (df["Ngày"] >= pd.to_datetime(start_date))
-        & (df["Ngày"] <= pd.to_datetime(end_date))
-        & (df["LoaiCT"].isin(loaiCT))
-        & (df["Brand"].isin(brand))
-        & (df["Region"].isin(region))
-        & (df["Điểm_mua_hàng"].isin(store))
-    )
-    return df.loc[mask]
-
-
-df_f = apply_filters(
-    df,
-    start_date,
-    end_date,
-    loaiCT_filter,
-    brand_filter,
-    region_filter,
-    store_filter,
+mask = (
+    (df["Ngày"] >= pd.to_datetime(start_date))
+    & (df["Ngày"] <= pd.to_datetime(end_date))
 )
+
+if "LoaiCT" in df.columns:
+    mask &= df["LoaiCT"].isin(loaiCT_filter if loaiCT_filter else [])
+
+if "Brand" in df.columns:
+    mask &= df["Brand"].isin(brand_filter if brand_filter else [])
+
+if "Region" in df.columns:
+    mask &= df["Region"].isin(region_filter if region_filter else [])
+
+if "Điểm_mua_hàng" in df.columns:
+    mask &= df["Điểm_mua_hàng"].isin(store_filter if store_filter else [])
+
+df_f = df.loc[mask].copy()
 
 if df_f.empty:
     st.warning("⚠ Không có dữ liệu sau khi áp bộ lọc.")
@@ -194,43 +172,41 @@ if df_f.empty:
 # =====================================================
 df_f_time = df_f.copy()
 if time_type == "Ngày":
-    df_f_time["Time"] = df_f_time["Ngày"].dt.date
+    df_f_time["Time"] = df_f_time["Ngày"].dt.date.astype(str)
 elif time_type == "Tuần":
     iso = df_f_time["Ngày"].dt.isocalendar()
-    df_f_time["Time"] = (
-        "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
-    )
+    df_f_time["Time"] = ("Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str))
 elif time_type == "Tháng":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
 elif time_type == "Quý":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
 elif time_type == "Năm":
-    df_f_time["Time"] = df_f_time["Ngày"].dt.year
+    df_f_time["Time"] = df_f_time["Ngày"].dt.year.astype(str)
 
 # =====================================================
 # KPI
 # =====================================================
-gross = df_f["Tổng_Gross"].sum()
-net = df_f["Tổng_Net"].sum()
-orders = df_f["Số_CT"].nunique()
-customers = df_f["Số_điện_thoại"].nunique()
+gross = float(df_f["Tổng_Gross"].sum()) if "Tổng_Gross" in df_f.columns else 0
+net   = float(df_f["Tổng_Net"].sum()) if "Tổng_Net" in df_f.columns else 0
+orders = df_f["Số_CT"].nunique() if "Số_CT" in df_f.columns else 0
+customers = df_f["Số_điện_thoại"].nunique() if "Số_điện_thoại" in df_f.columns else 0
 ck_rate = (1 - net / gross) * 100 if gross > 0 else 0
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Gross", value=f"{gross:,.0f}")
 c2.metric("Net", value=f"{net:,.0f}")
 c3.metric("CK %", value=f"{ck_rate:.2f}%")
-c4.metric("Đơn hàng", orders)
-c5.metric("Khách hàng", customers)
+c4.metric("Đơn hàng", value=f"{orders:,}")
+c5.metric("Khách hàng", value=f"{customers:,}")
 
 # =====================================================
 # TIME GROUP
 # =====================================================
-def group_time(df_f: pd.DataFrame, time_type: str) -> pd.DataFrame:
+def group_time(df_in: pd.DataFrame, tt: str) -> pd.DataFrame:
     freq_map = {"Ngày": "D", "Tuần": "W", "Tháng": "ME", "Quý": "Q", "Năm": "Y"}
     d = (
-        df_f.set_index("Ngày")
-        .resample(freq_map[time_type])
+        df_in.set_index("Ngày")
+        .resample(freq_map[tt])
         .agg(
             Gross=("Tổng_Gross", "sum"),
             Net=("Tổng_Net", "sum"),
@@ -241,39 +217,31 @@ def group_time(df_f: pd.DataFrame, time_type: str) -> pd.DataFrame:
     )
     d["CK_%"] = np.where(d["Gross"] > 0, (1 - d["Net"] / d["Gross"]) * 100, 0)
     d["Net_prev"] = d["Net"].shift(1)
-    d["Growth_%"] = np.where(
-        d["Net_prev"] > 0, (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100, 0
-    )
+    d["Growth_%"] = np.where(d["Net_prev"] > 0, (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100, 0)
     return d
 
-
 df_time = group_time(df_f, time_type)
-df_time = fix_float(df_time, ["CK_%", "Growth_%"])
 
 st.subheader(f"⏱ Theo thời gian ({time_type})")
+df_time_show = df_time.copy()
+df_time_show["Ngày"] = pd.to_datetime(df_time_show["Ngày"], errors="coerce").dt.strftime("%Y-%m-%d")
 
-render_table(
-    df_time,
-    col_cfg={
-        "Ngày": st.column_config.DatetimeColumn("Ngày"),
-        "Gross": num_col("Gross", 0),
-        "Net": num_col("Net", 0),
-        "Orders": num_col("Orders", 0),
-        "Customers": num_col("Customers", 0),
-        "CK_%": pct_col("CK_%", 2),
-        "Net_prev": num_col("Net_prev", 0),
-        "Growth_%": pct_col("Growth_%", 2),
-    },
-    key="tbl_time",
-)
+for c in ["Gross", "Net", "Orders", "Customers", "Net_prev"]:
+    if c in df_time_show.columns:
+        df_time_show[c] = df_time_show[c].apply(fmt_int)
 
+for c in ["CK_%", "Growth_%"]:
+    if c in df_time_show.columns:
+        df_time_show[c] = df_time_show[c].apply(lambda v: fmt_pct(v, 2, with_sign=(c == "Growth_%")))
+
+st.dataframe(df_time_show, use_container_width=True, hide_index=True)
 
 # =====================================================
 # REGION + TIME
 # =====================================================
-def group_region_time(df: pd.DataFrame) -> pd.DataFrame:
+def group_region_time(df_in: pd.DataFrame) -> pd.DataFrame:
     d = (
-        df.groupby(["Time", "Region"])
+        df_in.groupby(["Time", "Region"], dropna=False)
         .agg(
             Gross=("Tổng_Gross", "sum"),
             Net=("Tổng_Net", "sum"),
@@ -282,37 +250,30 @@ def group_region_time(df: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
-    d["CK_%"] = np.where(
-        d["Gross"] > 0, (d["Gross"] - d["Net"]) / d["Gross"] * 100, 0
-    )
+    d["CK_%"] = np.where(d["Gross"] > 0, (d["Gross"] - d["Net"]) / d["Gross"] * 100, 0)
     return d.sort_values(["Time", "Net"], ascending=[True, False])
 
+df_region_time = group_region_time(df_f_time)
 
-df_region_time = fix_float(group_region_time(df_f_time), ["CK_%"])
 st.subheader(f"🌍 Theo Region + {time_type}")
+df_region_time_show = df_region_time.copy()
+df_region_time_show["Time"] = df_region_time_show["Time"].astype(str)
 
-render_table(
-    df_region_time,
-    col_cfg={
-        "Time": st.column_config.TextColumn("Time"),
-        "Region": st.column_config.TextColumn("Region"),
-        "Gross": num_col("Gross", 0),
-        "Net": num_col("Net", 0),
-        "Orders": num_col("Orders", 0),
-        "Customers": num_col("Customers", 0),
-        "CK_%": pct_col("CK_%", 2),
-    },
-    key="tbl_region_time",
-)
+for c in ["Gross", "Net", "Orders", "Customers"]:
+    if c in df_region_time_show.columns:
+        df_region_time_show[c] = df_region_time_show[c].apply(fmt_int)
+if "CK_%" in df_region_time_show.columns:
+    df_region_time_show["CK_%"] = df_region_time_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
 
+st.dataframe(df_region_time_show, use_container_width=True, hide_index=True)
 
-# -------------------------
-# Báo cáo cửa hàng
-# -------------------------
+# =====================================================
+# STORE SUMMARY
+# =====================================================
 st.subheader("🏪 Tổng quan theo Cửa hàng")
 
 df_store = (
-    df_f.groupby("Điểm_mua_hàng")
+    df_f.groupby("Điểm_mua_hàng", dropna=False)
     .agg(
         Gross=("Tổng_Gross", "sum"),
         Net=("Tổng_Net", "sum"),
@@ -321,49 +282,38 @@ df_store = (
     )
     .reset_index()
 )
-df_store["CK_%"] = np.where(
-    df_store["Gross"] > 0,
-    (df_store["Gross"] - df_store["Net"]) / df_store["Gross"] * 100,
-    0,
-).round(2)
 
-render_table(
-    df_store.sort_values("Net", ascending=False),
-    col_cfg={
-        "Điểm_mua_hàng": st.column_config.TextColumn("Điểm_mua_hàng"),
-        "Gross": num_col("Gross", 0),
-        "Net": num_col("Net", 0),
-        "Orders": num_col("Orders", 0),
-        "Customers": num_col("Customers", 0),
-        "CK_%": pct_col("CK_%", 2),
-    },
-    key="tbl_store",
-)
+df_store["CK_%"] = np.where(df_store["Gross"] > 0, (df_store["Gross"] - df_store["Net"]) / df_store["Gross"] * 100, 0)
 
+df_store_show = df_store.sort_values("Net", ascending=False).copy()
+for c in ["Gross", "Net", "Orders", "Customers"]:
+    df_store_show[c] = df_store_show[c].apply(fmt_int)
+df_store_show["CK_%"] = df_store_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
 
-# -------------------------
-# Báo cáo nhóm sản phẩm
-# -------------------------
-df_product = df_f.copy()
+st.dataframe(df_store_show, use_container_width=True, hide_index=True)
+
+# =====================================================
+# PRODUCT SUMMARY
+# =====================================================
 st.subheader("📦 Theo Nhóm SP / Mã NB")
+
+df_product = df_f.copy()
 
 col1, col2 = st.columns(2)
 with col1:
-    nhom_sp_selected = st.multiselect(
-        "📦 Chọn Nhóm SP", sorted(df_product["Nhóm_hàng"].dropna().unique())
-    )
+    nhom_vals = sorted(df_product["Nhóm_hàng"].dropna().unique()) if "Nhóm_hàng" in df_product.columns else []
+    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals)
 with col2:
-    ten_sp_selected = st.multiselect(
-        "🏷️ Chọn Mã NB", sorted(df_product["Mã_NB"].dropna().unique())
-    )
+    ma_vals = sorted(df_product["Mã_NB"].dropna().unique()) if "Mã_NB" in df_product.columns else []
+    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals)
 
-if nhom_sp_selected:
+if nhom_sp_selected and "Nhóm_hàng" in df_product.columns:
     df_product = df_product[df_product["Nhóm_hàng"].isin(nhom_sp_selected)]
-if ten_sp_selected:
-    df_product = df_product[df_product["Mã_NB"].isin(ten_sp_selected)]
+if ma_nb_selected and "Mã_NB" in df_product.columns:
+    df_product = df_product[df_product["Mã_NB"].isin(ma_nb_selected)]
 
 df_product_group = (
-    df_product.groupby("Mã_NB")
+    df_product.groupby("Mã_NB", dropna=False)
     .agg(
         Gross=("Tổng_Gross", "sum"),
         Net=("Tổng_Net", "sum"),
@@ -374,15 +324,10 @@ df_product_group = (
     .sort_values("Net", ascending=False)
 )
 
-render_table(
-    df_product_group,
-    col_cfg={
-        "Mã_NB": st.column_config.TextColumn("Mã_NB"),
-        "Gross": num_col("Gross", 0),
-        "Net": num_col("Net", 0),
-        "Orders": num_col("Orders", 0),
-        "Customers": num_col("Customers", 0),
-    },
-    key="tbl_product",
-)
-  
+df_product_show = df_product_group.copy()
+for c in ["Gross", "Net", "Orders", "Customers"]:
+    if c in df_product_show.columns:
+        df_product_show[c] = df_product_show[c].apply(fmt_int)
+
+st.dataframe(df_product_show, use_container_width=True, hide_index=True)
+ 
