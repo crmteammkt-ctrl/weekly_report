@@ -198,9 +198,9 @@ customers = df_f["Số_điện_thoại"].nunique()
 ck_rate = (1 - net / gross) * 100 if gross > 0 else 0
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Gross", f"{gross:,.0f}")
-c2.metric("Net", f"{net:,.0f}")
-c3.metric("CK %", f"{ck_rate:.2f}%")
+c1.metric("Gross", value=f"{gross:,.0f}")
+c2.metric("Net", value=f"{net:,.0f}")
+c3.metric("CK %", value=f"{ck_rate:.2f}%")
 c4.metric("Đơn hàng", orders)
 c5.metric("Khách hàng", customers)
 
