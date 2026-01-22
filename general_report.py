@@ -115,6 +115,22 @@ if df.empty:
 # =====================================================
 # SIDEBAR FILTER (có liên kết Brand → Region → Cửa hàng)
 # =====================================================
+def with_all_option(values: list[str], label_all="All"):
+    """Thêm option 'Tất cả' vào danh sách"""
+    return [label_all] + values
+
+
+def normalize_filter(selected, all_values, label_all="All"):
+    """
+    Nếu:
+    - không chọn gì
+    - hoặc có 'Tất cả'
+    → trả về all_values
+    """
+    if (not selected) or (label_all in selected):
+        return all_values
+    return selected
+
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
@@ -129,17 +145,17 @@ with st.sidebar:
 
     # Cascading Brand -> Region -> Store
     all_brand = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
-    brand_filter = st.multiselect("Brand", all_brand, default=all_brand)
+    brand_filter = st.multiselect("Brand", all_brand, default=["All"])
 
     df_brand = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
 
     all_region = sorted(df_brand["Region"].dropna().unique()) if "Region" in df_brand.columns else []
-    region_filter = st.multiselect("Region", all_region, default=all_region)
+    region_filter = st.multiselect("Region", all_region, default=["All"])
 
     df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if region_filter else df_brand.iloc[0:0]
 
     all_store = sorted(df_brand_region["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_brand_region.columns else []
-    store_filter = st.multiselect("Cửa hàng", all_store, default=all_store)
+    store_filter = st.multiselect("Cửa hàng", all_store, default=["All"])
 
 # =====================================================
 # APPLY FILTER
