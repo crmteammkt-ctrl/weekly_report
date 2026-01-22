@@ -25,11 +25,13 @@ def fix_float(df: pd.DataFrame, cols) -> pd.DataFrame:
     return df
 
 def num_col(label: str, decimals: int = 0):
-    fmt = f"%,.{decimals}f"
-    return st.column_config.NumberColumn(label, format=fmt)
+    # d3-format: ",.0f" = có dấu phân tách hàng nghìn
+    return st.column_config.NumberColumn(label, format=f",.{decimals}f")
 
 def pct_col(label: str, decimals: int = 2):
-    return st.column_config.NumberColumn(label, format=f"%.{decimals}f")
+    # nếu CK_% đang là 20.8 (không phải 0.208) thì giữ dạng số thường
+    return st.column_config.NumberColumn(label, format=f".{decimals}f")
+
 
 def render_table(df_show: pd.DataFrame, col_cfg: dict, key: str | None = None):
     # dùng dataframe cho nhẹ (không cần edit)
