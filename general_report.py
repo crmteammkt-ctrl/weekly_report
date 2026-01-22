@@ -24,6 +24,23 @@ def fix_float(df: pd.DataFrame, cols) -> pd.DataFrame:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
     return df
 
+def num_col(label: str, decimals: int = 0):
+    fmt = f"%,.{decimals}f"
+    return st.column_config.NumberColumn(label, format=fmt)
+
+def pct_col(label: str, decimals: int = 2):
+    return st.column_config.NumberColumn(label, format=f"%.{decimals}f")
+
+def render_table(df_show: pd.DataFrame, col_cfg: dict, key: str | None = None):
+    # dùng dataframe cho nhẹ (không cần edit)
+    st.dataframe(
+        df_show,
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_cfg,
+        key=key,
+    )
+
 
 # =====================================================
 # Page config
@@ -232,7 +249,22 @@ df_time = group_time(df_f, time_type)
 df_time = fix_float(df_time, ["CK_%", "Growth_%"])
 
 st.subheader(f"⏱ Theo thời gian ({time_type})")
-st.dataframe(df_time, width="stretch")
+
+render_table(
+    df_time,
+    col_cfg={
+        "Ngày": st.column_config.DatetimeColumn("Ngày"),
+        "Gross": num_col("Gross", 0),
+        "Net": num_col("Net", 0),
+        "Orders": num_col("Orders", 0),
+        "Customers": num_col("Customers", 0),
+        "CK_%": pct_col("CK_%", 2),
+        "Net_prev": num_col("Net_prev", 0),
+        "Growth_%": pct_col("Growth_%", 2),
+    },
+    key="tbl_time",
+)
+
 
 # =====================================================
 # REGION + TIME
@@ -256,7 +288,21 @@ def group_region_time(df: pd.DataFrame) -> pd.DataFrame:
 
 df_region_time = fix_float(group_region_time(df_f_time), ["CK_%"])
 st.subheader(f"🌍 Theo Region + {time_type}")
-st.dataframe(df_region_time, width="stretch")
+
+render_table(
+    df_region_time,
+    col_cfg={
+        "Time": st.column_config.TextColumn("Time"),
+        "Region": st.column_config.TextColumn("Region"),
+        "Gross": num_col("Gross", 0),
+        "Net": num_col("Net", 0),
+        "Orders": num_col("Orders", 0),
+        "Customers": num_col("Customers", 0),
+        "CK_%": pct_col("CK_%", 2),
+    },
+    key="tbl_region_time",
+)
+
 
 # -------------------------
 # Báo cáo cửa hàng
@@ -279,7 +325,19 @@ df_store["CK_%"] = np.where(
     0,
 ).round(2)
 
-st.dataframe(df_store.sort_values("Net", ascending=False), width="stretch")
+render_table(
+    df_store.sort_values("Net", ascending=False),
+    col_cfg={
+        "Điểm_mua_hàng": st.column_config.TextColumn("Điểm_mua_hàng"),
+        "Gross": num_col("Gross", 0),
+        "Net": num_col("Net", 0),
+        "Orders": num_col("Orders", 0),
+        "Customers": num_col("Customers", 0),
+        "CK_%": pct_col("CK_%", 2),
+    },
+    key="tbl_store",
+)
+
 
 # -------------------------
 # Báo cáo nhóm sản phẩm
@@ -314,4 +372,15 @@ df_product_group = (
     .sort_values("Net", ascending=False)
 )
 
-st.dataframe(df_product_group, width="stretch")
+render_table(
+    df_product_group,
+    col_cfg={
+        "Mã_NB": st.column_config.TextColumn("Mã_NB"),
+        "Gross": num_col("Gross", 0),
+        "Net": num_col("Net", 0),
+        "Orders": num_col("Orders", 0),
+        "Customers": num_col("Customers", 0),
+    },
+    key="tbl_product",
+)
+  
