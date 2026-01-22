@@ -116,17 +116,9 @@ if df.empty:
 # SIDEBAR FILTER (có liên kết Brand → Region → Cửa hàng)
 # =====================================================
 def with_all_option(values: list[str], label_all="All"):
-    """Thêm option 'Tất cả' vào danh sách"""
     return [label_all] + values
 
-
 def normalize_filter(selected, all_values, label_all="All"):
-    """
-    Nếu:
-    - không chọn gì
-    - hoặc có 'Tất cả'
-    → trả về all_values
-    """
     if (not selected) or (label_all in selected):
         return all_values
     return selected
@@ -139,23 +131,30 @@ with st.sidebar:
     start_date = st.date_input("Từ ngày", df["Ngày"].min().date())
     end_date   = st.date_input("Đến ngày", df["Ngày"].max().date())
 
-    # Loại CT độc lập
+    # Loại CT (độc lập)
     all_loaiCT = sorted(df["LoaiCT"].dropna().unique()) if "LoaiCT" in df.columns else []
-    loaiCT_filter = st.multiselect("Loại CT", all_loaiCT, default=all_loaiCT)
+    loaiCT_ui = st.multiselect("Loại CT", with_all_option(all_loaiCT), default=["All"])
+    loaiCT_filter = normalize_filter(loaiCT_ui, all_loaiCT)
 
-    # Cascading Brand -> Region -> Store
+    # Brand
     all_brand = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
-    brand_filter = st.multiselect("Brand", all_brand, default=["All"])
+    brand_ui = st.multiselect("Brand", with_all_option(all_brand), default=["All"])
+    brand_filter = normalize_filter(brand_ui, all_brand)
 
-    df_brand = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
+    df_brand = df[df["Brand"].isin(brand_filter)] if (all_brand and brand_filter) else df.iloc[0:0]
 
+    # Region (phụ thuộc Brand)
     all_region = sorted(df_brand["Region"].dropna().unique()) if "Region" in df_brand.columns else []
-    region_filter = st.multiselect("Region", all_region, default=["All"])
+    region_ui = st.multiselect("Region", with_all_option(all_region), default=["All"])
+    region_filter = normalize_filter(region_ui, all_region)
 
-    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if region_filter else df_brand.iloc[0:0]
+    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if (all_region and region_filter) else df_brand.iloc[0:0]
 
+    # Store (phụ thuộc Brand + Region)
     all_store = sorted(df_brand_region["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_brand_region.columns else []
-    store_filter = st.multiselect("Cửa hàng", all_store, default=["All"])
+    store_ui = st.multiselect("Cửa hàng", with_all_option(all_store), default=["All"])
+    store_filter = normalize_filter(store_ui, all_store)
+
 
 # =====================================================
 # APPLY FILTER
