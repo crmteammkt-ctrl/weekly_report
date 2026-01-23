@@ -71,6 +71,13 @@ if df.empty:
 # =====================================================
 # SIDEBAR FILTER (Brand → Region → Store)
 # =====================================================
+def with_all_option(values: list[str], label_all="All"):
+    return [label_all] + values
+def normalize_filter(selected, all_values, label_all="All"):
+    if (not selected) or (label_all in selected):
+        return all_values
+    return selected
+
 with st.sidebar:
     st.header("🎛 Bộ lọc dữ liệu")
 
@@ -93,44 +100,53 @@ with st.sidebar:
 
     # Loại CT độc lập
     all_loaict = sorted(df["LoaiCT"].dropna().unique()) if "LoaiCT" in df.columns else []
-    loaict_filter = st.multiselect(
-        "LoaiCT", all_loaict, default=all_loaict, key="rev_loaict"
+    loaict_ui = st.multiselect(
+        "LoaiCT", with_all_option(all_loaict), default=["All"], key="rev_loaict"
     )
+    loaict_filter = normalize_filter(loaict_ui, all_loaict)
 
     # Brand -> Region -> Store (cascading)
     all_brands = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
-    brand_filter = st.multiselect(
-        "Brand", all_brands, default=all_brands, key="rev_brand"
+    brand_ui = st.multiselect(
+        "Brand", with_all_option(all_brands), default=["All"], key="rev_brand"
     )
+    brand_filter = normalize_filter(brand_ui, all_brands)
+
     df_b = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
 
     all_regions = sorted(df_b["Region"].dropna().unique()) if "Region" in df_b.columns else []
-    region_filter = st.multiselect(
-        "Region", all_regions, default=all_regions, key="rev_region"
+    region_ui = st.multiselect(
+        "Region", with_all_option(all_regions), default=["All"], key="rev_region"
     )
+    region_filter = normalize_filter(region_ui, all_regions)
+
     df_br = df_b[df_b["Region"].isin(region_filter)] if region_filter else df_b.iloc[0:0]
 
     all_stores = sorted(df_br["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_br.columns else []
-    store_filter = st.multiselect(
-        "Điểm mua hàng", all_stores, default=all_stores, key="rev_store"
+    store_ui = st.multiselect(
+        "Điểm mua hàng", with_all_option(all_stores), default=["All"], key="rev_store"
     )
+    store_filter = normalize_filter(store_ui, all_stores)
 
     # Check SĐT & Kiểm tra tên
     all_checksdt = sorted(df["Trạng_thái_số_điện_thoại"].dropna().unique()) if "Trạng_thái_số_điện_thoại" in df.columns else []
-    checksdt_filter = st.multiselect(
+    checksdt_ui = st.multiselect(
         "Trạng_thái_số_điện_thoại",
-        all_checksdt,
-        default=all_checksdt,
+        with_all_option(all_checksdt),
+        default=["All"],
         key="rev_checksdt",
     )
+    checksdt_filter = normalize_filter(checksdt_ui, all_checksdt)
 
     all_checkten = sorted(df["Kiểm_tra_tên"].dropna().unique()) if "Kiểm_tra_tên" in df.columns else []
-    checkten_filter = st.multiselect(
+    checkten_ui = st.multiselect(
         "Kiểm_tra_tên",
-        all_checkten,
-        default=all_checkten,
+        with_all_option(all_checkten),
+        default=["All"],
         key="rev_checkten",
     )
+    checkten_filter = normalize_filter(checkten_ui, all_checkten)
+
 
 # =====================================================
 # APPLY FILTER
