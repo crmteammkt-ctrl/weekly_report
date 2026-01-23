@@ -77,6 +77,13 @@ if df.empty:
 # =====================================================
 # SIDEBAR FILTER (có liên kết Brand → Region → Cửa hàng)
 # =====================================================
+def with_all_option(values: list[str], label_all="All"):
+    return [label_all] + values
+def normalize_filter(selected, all_values, label_all="All"):
+    if (not selected) or (label_all in selected):
+        return all_values
+    return selected
+
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (CRM & Cohort)")
 
@@ -85,19 +92,25 @@ with st.sidebar:
 
     # Loại CT
     all_loaiCT = sorted(df["LoaiCT"].dropna().unique()) if "LoaiCT" in df.columns else []
-    loaiCT_filter = st.multiselect("Loại CT", all_loaiCT, default=all_loaiCT)
+    loaiCT_ui = st.multiselect("Loại CT", with_all_option(all_loaiCT), default=["All"])
+    loaiCT_filter = normalize_filter(loaiCT_ui, all_loaiCT)
 
     # Brand -> Region -> Cửa hàng
     all_brand = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
-    brand_filter = st.multiselect("Brand", all_brand, default=all_brand)
+    brand_ui = st.multiselect("Brand", with_all_option(all_brand), default=["All"])
+    brand_filter = normalize_filter(brand_ui,all_brand)
+
     df_b = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
 
     all_region = sorted(df_b["Region"].dropna().unique()) if "Region" in df_b.columns else []
-    region_filter = st.multiselect("Region", all_region, default=all_region)
+    region_ui = st.multiselect("Region", with_all_option(all_region), default=["All"])
+    region_filter = normalize_filter(region_ui, all_region)
+
     df_br = df_b[df_b["Region"].isin(region_filter)] if region_filter else df_b.iloc[0:0]
 
     all_store = sorted(df_br["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_br.columns else []
-    store_filter = st.multiselect("Cửa hàng", all_store, default=all_store)
+    store_ui = st.multiselect("Cửa hàng", with_all_option(all_store), default=["All"])
+    store_filter = normalize_filter(store_ui, all_store)
 
 def apply_filters(df: pd.DataFrame, start_date, end_date, loaiCT, brand, region, store) -> pd.DataFrame:
     mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
