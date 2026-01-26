@@ -14,7 +14,7 @@ def fmt_int(x):
         return ""
     try:
         return f"{float(x):,.0f}"
-    except:
+    except Exception:
         return ""
 
 def fmt_pct(x, decimals=2, with_sign=False):
@@ -27,7 +27,7 @@ def fmt_pct(x, decimals=2, with_sign=False):
         if with_sign and v > 0:
             s = "+" + s
         return s
-    except:
+    except Exception:
         return ""
 
 def ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
@@ -41,6 +41,44 @@ def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
+
+# =====================================================
+# FILTER HELPERS (GỌN + LINH HOẠT + ALL + RESET)
+# =====================================================
+GEN_PREFIX = "gen_"
+
+def reset_by_prefix(prefix: str):
+    for k in list(st.session_state.keys()):
+        if k.startswith(prefix):
+            st.session_state.pop(k, None)
+    st.rerun()
+
+def ms_all(key: str, label: str, options, all_label="All", default_all=True):
+    """
+    Multiselect có All:
+    - options đổi không crash
+    - selection cũ được giữ nếu còn hợp lệ
+    - trả về list giá trị thật để filter (không gồm All)
+    """
+    opts = pd.Series(list(options)).dropna().astype(str).str.strip()
+    opts = sorted(opts.unique().tolist())
+    ui_opts = [all_label] + opts
+
+    # init BEFORE widget
+    if key not in st.session_state:
+        st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
+
+    # sanitize BEFORE widget
+    cur = [str(x).strip() for x in st.session_state.get(key, []) if str(x).strip() in ui_opts]
+    if not cur:
+        cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
+        st.session_state[key] = cur
+
+    selected = st.multiselect(label, options=ui_opts, key=key)
+
+    if (not selected) or (all_label in selected):
+        return opts
+    return [x for x in selected if x in opts]
 
 # =====================================================
 # Page config
@@ -72,7 +110,6 @@ with st.sidebar:
 
 # Xử lý upload / reset
 if src_choice == "Upload file parquet từ máy" and uploaded_files:
-    # KHÔNG cache để tránh giữ nhiều bản copy => giảm nguy cơ vượt RAM
     dfs = []
     for f in uploaded_files:
         try:
@@ -90,7 +127,6 @@ if src_choice == "Upload file parquet từ máy" and uploaded_files:
         set_active_data(df_up, source="upload")
         st.success(f"✅ Đã cập nhật dữ liệu từ {len(uploaded_files)} file parquet upload")
 
-    # giải phóng tham chiếu list (giảm nguy cơ giữ RAM)
     del dfs, df_up
 
 elif src_choice == "Quay lại dữ liệu mặc định":
@@ -101,9 +137,7 @@ elif src_choice == "Quay lại dữ liệu mặc định":
 
 # Luôn lấy lại dữ liệu đang active
 df = get_active_data()
-st.sidebar.caption(
-    "🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default"))
-)
+st.sidebar.caption("🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default")))
 
 df = ensure_datetime(df)
 df = fix_numeric(df)
@@ -113,56 +147,65 @@ if df.empty:
     st.stop()
 
 # =====================================================
-# SIDEBAR FILTER (có liên kết Brand → Region → Cửa hàng)
+# SIDEBAR FILTER (GỌN + ALL + CASCADE + RESET)
 # =====================================================
-def with_all_option(values: list[str], label_all="All"):
-    return [label_all] + values
-
-def normalize_filter(selected, all_values, label_all="All"):
-    if (not selected) or (label_all in selected):
-        return all_values
-    return selected
-
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
-    time_type = st.selectbox("Phân tích theo", ["Ngày", "Tuần", "Tháng", "Quý", "Năm"])
+    if st.button("🔄 Reset bộ lọc (General)", use_container_width=True):
+        reset_by_prefix(GEN_PREFIX)
 
-    start_date = st.date_input("Từ ngày", df["Ngày"].min().date())
-    end_date   = st.date_input("Đến ngày", df["Ngày"].max().date())
+    time_type = st.selectbox(
+        "Phân tích theo",
+        ["Ngày", "Tuần", "Tháng", "Quý", "Năm"],
+        key=GEN_PREFIX + "time_type",
+    )
 
-    # Loại CT (độc lập)
-    all_loaiCT = sorted(df["LoaiCT"].dropna().unique()) if "LoaiCT" in df.columns else []
-    loaiCT_ui = st.multiselect("Loại CT", with_all_option(all_loaiCT), default=["All"])
-    loaiCT_filter = normalize_filter(loaiCT_ui, all_loaiCT)
+    start_date = st.date_input(
+        "Từ ngày",
+        df["Ngày"].min().date(),
+        key=GEN_PREFIX + "start_date",
+    )
+    end_date = st.date_input(
+        "Đến ngày",
+        df["Ngày"].max().date(),
+        key=GEN_PREFIX + "end_date",
+    )
+
+    # Loại CT
+    loaiCT_filter = ms_all(
+        key=GEN_PREFIX + "loaiCT",
+        label="Loại CT",
+        options=df["LoaiCT"] if "LoaiCT" in df.columns else [],
+    )
 
     # Brand
-    all_brand = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
-    brand_ui = st.multiselect("Brand", with_all_option(all_brand), default=["All"])
-    brand_filter = normalize_filter(brand_ui, all_brand)
+    brand_filter = ms_all(
+        key=GEN_PREFIX + "brand",
+        label="Brand",
+        options=df["Brand"] if "Brand" in df.columns else [],
+    )
 
-    df_brand = df[df["Brand"].isin(brand_filter)] if (all_brand and brand_filter) else df.iloc[0:0]
+    # Cascade Region by Brand
+    df_brand = df[df["Brand"].isin(brand_filter)] if (brand_filter and "Brand" in df.columns) else df.iloc[0:0]
+    region_filter = ms_all(
+        key=GEN_PREFIX + "region",
+        label="Region",
+        options=df_brand["Region"] if "Region" in df_brand.columns else [],
+    )
 
-    # Region (phụ thuộc Brand)
-    all_region = sorted(df_brand["Region"].dropna().unique()) if "Region" in df_brand.columns else []
-    region_ui = st.multiselect("Region", with_all_option(all_region), default=["All"])
-    region_filter = normalize_filter(region_ui, all_region)
-
-    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if (all_region and region_filter) else df_brand.iloc[0:0]
-
-    # Store (phụ thuộc Brand + Region)
-    all_store = sorted(df_brand_region["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_brand_region.columns else []
-    store_ui = st.multiselect("Cửa hàng", with_all_option(all_store), default=["All"])
-    store_filter = normalize_filter(store_ui, all_store)
-
+    # Cascade Store by Brand + Region
+    df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if (region_filter and "Region" in df_brand.columns) else df_brand.iloc[0:0]
+    store_filter = ms_all(
+        key=GEN_PREFIX + "store",
+        label="Cửa hàng",
+        options=df_brand_region["Điểm_mua_hàng"] if "Điểm_mua_hàng" in df_brand_region.columns else [],
+    )
 
 # =====================================================
 # APPLY FILTER
 # =====================================================
-mask = (
-    (df["Ngày"] >= pd.to_datetime(start_date))
-    & (df["Ngày"] <= pd.to_datetime(end_date))
-)
+mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
 
 if "LoaiCT" in df.columns:
     mask &= df["LoaiCT"].isin(loaiCT_filter if loaiCT_filter else [])
@@ -202,7 +245,7 @@ elif time_type == "Năm":
 # KPI
 # =====================================================
 gross = float(df_f["Tổng_Gross"].sum()) if "Tổng_Gross" in df_f.columns else 0
-net   = float(df_f["Tổng_Net"].sum()) if "Tổng_Net" in df_f.columns else 0
+net = float(df_f["Tổng_Net"].sum()) if "Tổng_Net" in df_f.columns else 0
 orders = df_f["Số_CT"].nunique() if "Số_CT" in df_f.columns else 0
 customers = df_f["Số_điện_thoại"].nunique() if "Số_điện_thoại" in df_f.columns else 0
 ck_rate = (1 - net / gross) * 100 if gross > 0 else 0
@@ -317,10 +360,10 @@ df_product = df_f.copy()
 col1, col2 = st.columns(2)
 with col1:
     nhom_vals = sorted(df_product["Nhóm_hàng"].dropna().unique()) if "Nhóm_hàng" in df_product.columns else []
-    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals)
+    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals, key=GEN_PREFIX + "nhom_sp")
 with col2:
     ma_vals = sorted(df_product["Mã_NB"].dropna().unique()) if "Mã_NB" in df_product.columns else []
-    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals)
+    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals, key=GEN_PREFIX + "ma_nb")
 
 if nhom_sp_selected and "Nhóm_hàng" in df_product.columns:
     df_product = df_product[df_product["Nhóm_hàng"].isin(nhom_sp_selected)]
@@ -345,4 +388,3 @@ for c in ["Gross", "Net", "Orders", "Customers"]:
         df_product_show[c] = df_product_show[c].apply(fmt_int)
 
 st.dataframe(df_product_show, use_container_width=True, hide_index=True)
- 
