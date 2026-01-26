@@ -7,6 +7,53 @@ from io import BytesIO
 
 from load_data import get_active_data, first_purchase
 
+def safe_multiselect_all(
+    key: str,
+    label: str,
+    options,
+    all_label: str = "All",
+    default_all: bool = True,
+    normalize: bool = True,
+):
+    """
+    Multiselect có 'All' an toàn:
+    - All luôn hợp lệ
+    - options đổi không bao giờ crash
+    - nhớ selection cũ nếu còn tồn tại
+    """
+    # Chuẩn hoá options
+    opts = pd.Series(list(options)).dropna().astype(str)
+    if normalize:
+        opts = opts.str.strip()
+    opts = sorted(opts.unique().tolist())
+
+    ui_opts = [all_label] + opts
+
+    # Init session
+    if key not in st.session_state:
+        st.session_state[key] = [all_label] if default_all else opts[:1]
+
+    # Lọc lại selection cũ
+    current = st.session_state.get(key, [])
+    current = [str(x).strip() for x in current if str(x).strip() in ui_opts]
+
+    if not current:
+        current = [all_label] if default_all else opts[:1]
+
+    selected = st.multiselect(
+        label,
+        options=ui_opts,
+        default=current,
+        key=key,
+    )
+
+    # Normalize output
+    if (not selected) or (all_label in selected):
+        return opts   # trả về TOÀN BỘ option thật
+
+    return [x for x in selected if x in opts]
+
+
 # =====================================================
 # FORMAT HELPERS (an toàn - không phụ thuộc Streamlit format)
 # =====================================================
@@ -96,9 +143,14 @@ with st.sidebar:
     loaiCT_filter = normalize_filter(loaiCT_ui, all_loaiCT)
 
     # Brand -> Region -> Cửa hàng
-    all_brand = sorted(df["Brand"].dropna().unique()) if "Brand" in df.columns else []
-    brand_ui = st.multiselect("Brand", with_all_option(all_brand), default=["All"])
-    brand_filter = normalize_filter(brand_ui,all_brand)
+    with st.sidebar:
+        brand_filter = safe_multiselect_all(
+        key="brand_filter",
+        label="Brand",
+        options=df["Brand"],
+        all_label="All",
+        default_all=True,
+    )
 
     df_b = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
 
@@ -229,18 +281,23 @@ if "kiem_tra_ten_filter" not in st.session_state:
     st.session_state.kiem_tra_ten_filter = df_f["Kiểm_tra_tên"].dropna().unique().tolist()
 
 with col4:
-    kiem_tra_ten_filter = st.multiselect(
-        "Kiểm tra tên KH",
-        options=df_f["Kiểm_tra_tên"].dropna().unique(),
-        default=st.session_state.kiem_tra_ten_filter,
+    kiem_tra_ten_filter = safe_multiselect_all(
+        key="kiem_tra_ten_filter",
+        label="Kiểm tra tên KH",
+        options=df_f["Kiểm_tra_tên"],
+        all_label="All",
+        default_all=True,
     )
+
     st.session_state.kiem_tra_ten_filter = kiem_tra_ten_filter
 
 with col5:
-    check_sdt_filter = st.multiselect(
-        "Check SĐT",
-        options=df_export["Check_SDT"].dropna().unique(),
-        default=df_export["Check_SDT"].dropna().unique(),
+    check_sdt_filter = safe_multiselect_all(
+        key="check_sdt_filter",
+        label="Check SĐT",
+        options=df_export["Check_SDT"],
+        all_label="All",
+        default_all=True,
     )
 
 selected_tags = []
