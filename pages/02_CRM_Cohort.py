@@ -7,6 +7,9 @@ from io import BytesIO
 
 from load_data import get_active_data, first_purchase
 
+# =====================================================
+# SAFE MULTISELECT WITH "ALL"
+# =====================================================
 def safe_multiselect_all(
     key: str,
     label: str,
@@ -19,9 +22,10 @@ def safe_multiselect_all(
     Multiselect có 'All' an toàn:
     - All luôn hợp lệ
     - options đổi không bao giờ crash
-    - nhớ selection cũ nếu còn tồn tại
+    - giữ selection cũ nếu còn tồn tại
+    - không modify session_state sau khi widget instantiate
     """
-    # Chuẩn hoá options
+    # Build clean options
     opts = pd.Series(list(options)).dropna().astype(str)
     if normalize:
         opts = opts.str.strip()
@@ -29,28 +33,23 @@ def safe_multiselect_all(
 
     ui_opts = [all_label] + opts
 
-    # Init session
+    # Init session BEFORE widget
     if key not in st.session_state:
-        st.session_state[key] = [all_label] if default_all else opts[:1]
+        st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
 
-    # Lọc lại selection cũ
-    current = st.session_state.get(key, [])
-    current = [str(x).strip() for x in current if str(x).strip() in ui_opts]
+    # Sanitize current selection BEFORE widget
+    cur = st.session_state.get(key, [])
+    cur = [str(x).strip() for x in cur if str(x).strip() in ui_opts]
+    if not cur:
+        cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
+        st.session_state[key] = cur  # still BEFORE widget
 
-    if not current:
-        current = [all_label] if default_all else opts[:1]
+    # Create widget (do NOT assign st.session_state[key] after this)
+    selected = st.multiselect(label, options=ui_opts, key=key)
 
-    selected = st.multiselect(
-        label,
-        options=ui_opts,
-        default=current,
-        key=key,
-    )
-
-    # Normalize output
+    # Return normalized selection for filtering
     if (not selected) or (all_label in selected):
-        return opts   # trả về TOÀN BỘ option thật
-
+        return opts
     return [x for x in selected if x in opts]
 
 
@@ -62,16 +61,18 @@ def fmt_int(x):
         return ""
     try:
         return f"{float(x):,.0f}"
-    except:
+    except Exception:
         return ""
+
 
 def fmt_num(x, decimals=2):
     if pd.isna(x):
         return ""
     try:
         return f"{float(x):,.{decimals}f}"
-    except:
+    except Exception:
         return ""
+
 
 def fmt_pct(x, decimals=2):
     # x đang là 20.8 => "20.80%"
@@ -79,8 +80,9 @@ def fmt_pct(x, decimals=2):
         return ""
     try:
         return f"{float(x):,.{decimals}f}%"
-    except:
+    except Exception:
         return ""
+
 
 def to_excel(df: pd.DataFrame) -> bytes:
     output = BytesIO()
@@ -88,11 +90,13 @@ def to_excel(df: pd.DataFrame) -> bytes:
         df.to_excel(writer, index=False, sheet_name="Data")
     return output.getvalue()
 
+
 def ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
     if "Ngày" in df.columns:
         df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
         df = df.dropna(subset=["Ngày"])
     return df
+
 
 def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
     for c in ["Tổng_Gross", "Tổng_Net"]:
@@ -100,10 +104,12 @@ def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
+
 def show_df(df_show: pd.DataFrame, title: str | None = None):
     if title:
         st.subheader(title)
     st.dataframe(df_show, use_container_width=True, hide_index=True)
+
 
 # =====================================================
 # PAGE
@@ -122,47 +128,54 @@ if df.empty:
     st.stop()
 
 # =====================================================
-# SIDEBAR FILTER (có liên kết Brand → Region → Cửa hàng)
+# SIDEBAR FILTER (Brand → Region → Cửa hàng) + All
 # =====================================================
-def with_all_option(values: list[str], label_all="All"):
-    return [label_all] + values
-def normalize_filter(selected, all_values, label_all="All"):
-    if (not selected) or (label_all in selected):
-        return all_values
-    return selected
-
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (CRM & Cohort)")
 
     start_date = st.date_input("Từ ngày", df["Ngày"].min().date())
     end_date = st.date_input("Đến ngày", df["Ngày"].max().date())
 
-    # Loại CT
-    all_loaiCT = sorted(df["LoaiCT"].dropna().unique()) if "LoaiCT" in df.columns else []
-    loaiCT_ui = st.multiselect("Loại CT", with_all_option(all_loaiCT), default=["All"])
-    loaiCT_filter = normalize_filter(loaiCT_ui, all_loaiCT)
-
-    # Brand -> Region -> Cửa hàng
-    with st.sidebar:
-        brand_filter = safe_multiselect_all(
-        key="brand_filter",
-        label="Brand",
-        options=df["Brand"],
+    loaiCT_filter = safe_multiselect_all(
+        key="loaiCT_filter",
+        label="Loại CT",
+        options=df["LoaiCT"] if "LoaiCT" in df.columns else [],
         all_label="All",
         default_all=True,
     )
 
-    df_b = df[df["Brand"].isin(brand_filter)] if brand_filter else df.iloc[0:0]
+    brand_filter = safe_multiselect_all(
+        key="brand_filter",
+        label="Brand",
+        options=df["Brand"] if "Brand" in df.columns else [],
+        all_label="All",
+        default_all=True,
+    )
 
-    all_region = sorted(df_b["Region"].dropna().unique()) if "Region" in df_b.columns else []
-    region_ui = st.multiselect("Region", with_all_option(all_region), default=["All"])
-    region_filter = normalize_filter(region_ui, all_region)
+# Cascade: Region by Brand
+df_b = df[df["Brand"].isin(brand_filter)] if (brand_filter and "Brand" in df.columns) else df.iloc[0:0]
 
-    df_br = df_b[df_b["Region"].isin(region_filter)] if region_filter else df_b.iloc[0:0]
+with st.sidebar:
+    region_filter = safe_multiselect_all(
+        key="region_filter",
+        label="Region",
+        options=df_b["Region"] if "Region" in df_b.columns else [],
+        all_label="All",
+        default_all=True,
+    )
 
-    all_store = sorted(df_br["Điểm_mua_hàng"].dropna().unique()) if "Điểm_mua_hàng" in df_br.columns else []
-    store_ui = st.multiselect("Cửa hàng", with_all_option(all_store), default=["All"])
-    store_filter = normalize_filter(store_ui, all_store)
+# Cascade: Store by Brand+Region
+df_br = df_b[df_b["Region"].isin(region_filter)] if (region_filter and "Region" in df_b.columns) else df_b.iloc[0:0]
+
+with st.sidebar:
+    store_filter = safe_multiselect_all(
+        key="store_filter",
+        label="Cửa hàng",
+        options=df_br["Điểm_mua_hàng"] if "Điểm_mua_hàng" in df_br.columns else [],
+        all_label="All",
+        default_all=True,
+    )
+
 
 def apply_filters(df: pd.DataFrame, start_date, end_date, loaiCT, brand, region, store) -> pd.DataFrame:
     mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
@@ -177,6 +190,7 @@ def apply_filters(df: pd.DataFrame, start_date, end_date, loaiCT, brand, region,
         mask &= df["Điểm_mua_hàng"].isin(store if store else [])
 
     return df.loc[mask].copy()
+
 
 df_f = apply_filters(df, start_date, end_date, loaiCT_filter, brand_filter, region_filter, store_filter)
 
@@ -204,6 +218,7 @@ group_cols = ["Số_điện_thoại"]
 if not GROUP_BY_CUSTOMER:
     group_cols.append("Điểm_mua_hàng")
 
+
 def build_crm(df_f: pd.DataFrame, group_cols):
     d = (
         df_f.groupby(group_cols)
@@ -220,6 +235,7 @@ def build_crm(df_f: pd.DataFrame, group_cols):
         .reset_index()
     )
     return d
+
 
 df_export = build_crm(df_f, group_cols)
 
@@ -277,25 +293,20 @@ with col2:
 with col3:
     show_customer = st.checkbox("Khách hàng thường", value=True)
 
-if "kiem_tra_ten_filter" not in st.session_state:
-    st.session_state.kiem_tra_ten_filter = df_f["Kiểm_tra_tên"].dropna().unique().tolist()
-
 with col4:
     kiem_tra_ten_filter = safe_multiselect_all(
         key="kiem_tra_ten_filter",
         label="Kiểm tra tên KH",
-        options=df_f["Kiểm_tra_tên"],
+        options=df_f["Kiểm_tra_tên"] if "Kiểm_tra_tên" in df_f.columns else [],
         all_label="All",
         default_all=True,
     )
-
-    st.session_state.kiem_tra_ten_filter = kiem_tra_ten_filter
 
 with col5:
     check_sdt_filter = safe_multiselect_all(
         key="check_sdt_filter",
         label="Check SĐT",
-        options=df_export["Check_SDT"],
+        options=df_export["Check_SDT"] if "Check_SDT" in df_export.columns else [],
         all_label="All",
         default_all=True,
     )
@@ -349,7 +360,6 @@ df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_
 # ===== format hiển thị CRM =====
 df_export_display = df_export_with_total[display_cols].copy()
 
-# format số
 for c in ["Gross", "Net", "Orders"]:
     if c in df_export_display.columns:
         df_export_display[c] = df_export_display[c].apply(fmt_int)
@@ -358,14 +368,14 @@ if "CK_%" in df_export_display.columns:
     df_export_display["CK_%"] = df_export_display["CK_%"].apply(lambda v: fmt_pct(v, 2))
 
 if "Bao_lâu_không_mua" in df_export_display.columns:
-    # cột này là số ngày, giữ int format
     df_export_display["Bao_lâu_không_mua"] = df_export_display["Bao_lâu_không_mua"].apply(
         lambda v: "" if pd.isna(v) else fmt_int(v)
     )
 
-# Last_Order hiển thị yyyy-mm-dd
 if "Last_Order" in df_export_display.columns:
-    df_export_display["Last_Order"] = pd.to_datetime(df_export_display["Last_Order"], errors="coerce").dt.strftime("%Y-%m-%d")
+    df_export_display["Last_Order"] = pd.to_datetime(
+        df_export_display["Last_Order"], errors="coerce"
+    ).dt.strftime("%Y-%m-%d")
 
 show_df(df_export_display, title=None)
 
@@ -388,6 +398,7 @@ store_filter_pareto = st.sidebar.multiselect(
     sorted(df_f["Điểm_mua_hàng"].dropna().unique()),
     default=sorted(df_f["Điểm_mua_hàng"].dropna().unique()),
 )
+
 
 def pareto_customer_by_store(df: pd.DataFrame, percent=20, top=True) -> pd.DataFrame:
     rows = []
@@ -416,6 +427,7 @@ def pareto_customer_by_store(df: pd.DataFrame, percent=20, top=True) -> pd.DataF
     if rows:
         return pd.concat(rows, ignore_index=True)
     return pd.DataFrame()
+
 
 df_pareto_base = df_f.copy()
 if store_filter_pareto:
@@ -499,7 +511,6 @@ if not retention.empty:
 
 st.subheader("🏅 Cohort Retention – Cộng dồn (%)")
 
-# format hiển thị retention
 if retention.empty:
     st.info("Không có dữ liệu cohort.")
 else:
@@ -509,3 +520,15 @@ else:
         if c.startswith("Sau"):
             retention_show[c] = retention_show[c].apply(lambda v: fmt_pct(v, 2))
     show_df(retention_show, title=None)
+
+# =========================
+# RESET FILTERS BUTTON
+# =========================
+with st.sidebar:
+    if st.button("🔄 Reset filters"):
+        for k in [
+            "loaiCT_filter", "brand_filter", "region_filter", "store_filter",
+            "kiem_tra_ten_filter", "check_sdt_filter",
+        ]:
+            st.session_state.pop(k, None)
+        st.rerun()
