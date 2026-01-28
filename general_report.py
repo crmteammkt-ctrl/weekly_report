@@ -375,7 +375,7 @@ df_product_group = (
     .agg(
         Gross=("Tổng_Gross", "sum"),
         Net=("Tổng_Net", "sum"),
-        Orders=("Số_CT", "nunique"),
+        Orders=("Số_lượng", "sum"),
         Customers=("Số_điện_thoại", "nunique"),
     )
     .reset_index()
