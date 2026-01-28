@@ -7,7 +7,7 @@ from io import BytesIO
 from load_data import get_active_data, set_active_data
 
 # =====================================================
-# FORMAT HELPERS (an toàn - không phụ thuộc Streamlit version)
+# FORMAT HELPERS
 # =====================================================
 def fmt_int(x):
     if pd.isna(x):
@@ -18,7 +18,6 @@ def fmt_int(x):
         return ""
 
 def fmt_pct(x, decimals=2, with_sign=False):
-    # x đang là 20.8 nghĩa là 20.8%
     if pd.isna(x):
         return ""
     try:
@@ -46,17 +45,10 @@ def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
 # WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ TUỲ CHỌN)
 # =====================================================
 def week_anchor(dt: pd.Series, week_start: int) -> pd.Series:
-    """
-    Trả về ngày "neo" của tuần theo week_start (0=Mon ... 6=Sun), normalize về 00:00:00
-    """
     d = pd.to_datetime(dt)
     return (d - pd.to_timedelta((d.dt.weekday - week_start) % 7, unit="D")).dt.normalize()
 
 def week_label_from_anchor(anchor: pd.Series) -> pd.Series:
-    """
-    Tạo label dạng 'Tuần WW/YYYY' dựa trên anchor.
-    Dùng ISO week-year của chính anchor để ổn định.
-    """
     iso = pd.to_datetime(anchor).dt.isocalendar()
     return "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
 
@@ -77,14 +69,7 @@ def reset_by_prefix(prefix: str):
             st.session_state.pop(k, None)
     st.rerun()
 
-
 def ms_all(key: str, label: str, options, all_label="All", default_all=True):
-    """
-    Multiselect có All:
-    - options đổi không crash
-    - selection cũ được giữ nếu còn hợp lệ
-    - trả về list giá trị thật để filter (không gồm All)
-    """
     opts = pd.Series(list(options)).dropna().astype(str).str.strip()
     opts = sorted(opts.unique().tolist())
     ui_opts = [all_label] + opts
@@ -172,6 +157,11 @@ if df.empty:
 # =====================================================
 # SIDEBAR FILTER (GỌN + ALL + CASCADE + RESET)
 # =====================================================
+WEEKDAY_MAP = {
+    "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
+    "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
+}
+
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
@@ -184,20 +174,14 @@ with st.sidebar:
         key=GEN_PREFIX + "time_type",
     )
 
-    # ✅ TUẦN BẮT ĐẦU THEO THỨ (CHỈ DÙNG KHI time_type == 'Tuần')
+    # ✅ KEY CHUNG TOÀN APP (Revenue sẽ đọc key này)
     week_start_label = st.selectbox(
-    "Tuần bắt đầu từ thứ",
-    ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
-    index=0,
-    key="app_week_start",  # ✅ KEY CHUNG TOÀN APP
-)
-
-WEEKDAY_MAP = {
-    "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
-    "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
-}
-WEEK_START = WEEKDAY_MAP.get(week_start_label, 0)
-
+        "Tuần bắt đầu từ thứ",
+        ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
+        index=0,
+        key="app_week_start",
+    )
+    WEEK_START = WEEKDAY_MAP.get(week_start_label, 0)
 
     start_date = st.date_input(
         "Từ ngày",
@@ -210,21 +194,18 @@ WEEK_START = WEEKDAY_MAP.get(week_start_label, 0)
         key=GEN_PREFIX + "end_date",
     )
 
-    # Loại CT
     loaiCT_filter = ms_all(
         key=GEN_PREFIX + "loaiCT",
         label="Loại CT",
         options=df["LoaiCT"] if "LoaiCT" in df.columns else [],
     )
 
-    # Brand
     brand_filter = ms_all(
         key=GEN_PREFIX + "brand",
         label="Brand",
         options=df["Brand"] if "Brand" in df.columns else [],
     )
 
-    # Cascade Region by Brand
     df_brand = df[df["Brand"].isin(brand_filter)] if (brand_filter and "Brand" in df.columns) else df.iloc[0:0]
     region_filter = ms_all(
         key=GEN_PREFIX + "region",
@@ -232,7 +213,6 @@ WEEK_START = WEEKDAY_MAP.get(week_start_label, 0)
         options=df_brand["Region"] if "Region" in df_brand.columns else [],
     )
 
-    # Cascade Store by Brand + Region
     df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if (region_filter and "Region" in df_brand.columns) else df_brand.iloc[0:0]
     store_filter = ms_all(
         key=GEN_PREFIX + "store",
@@ -247,13 +227,10 @@ mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datet
 
 if "LoaiCT" in df.columns:
     mask &= df["LoaiCT"].isin(loaiCT_filter if loaiCT_filter else [])
-
 if "Brand" in df.columns:
     mask &= df["Brand"].isin(brand_filter if brand_filter else [])
-
 if "Region" in df.columns:
     mask &= df["Region"].isin(region_filter if region_filter else [])
-
 if "Điểm_mua_hàng" in df.columns:
     mask &= df["Điểm_mua_hàng"].isin(store_filter if store_filter else [])
 
@@ -270,18 +247,13 @@ df_f_time = df_f.copy()
 
 if time_type == "Ngày":
     df_f_time["Time"] = df_f_time["Ngày"].dt.date.astype(str)
-
 elif time_type == "Tuần":
-    # ✅ neo tuần theo thứ chọn + label Tuần WW/YYYY
     df_f_time["_WeekAnchor"] = week_anchor(df_f_time["Ngày"], WEEK_START)
     df_f_time["Time"] = week_label_from_anchor(df_f_time["_WeekAnchor"])
-
 elif time_type == "Tháng":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
-
 elif time_type == "Quý":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
-
 elif time_type == "Năm":
     df_f_time["Time"] = df_f_time["Ngày"].dt.year.astype(str)
 
@@ -347,10 +319,7 @@ st.subheader(f"⏱ Theo thời gian ({time_type})")
 df_time_show = df_time.copy()
 
 if time_type == "Tuần":
-    # ✅ hiển thị dạng 'Tuần WW/YYYY' cho bảng thời gian
-    df_time_show["_label"] = week_label_from_anchor(df_time_show["Ngày"])
-    df_time_show["Ngày"] = df_time_show["_label"]
-    df_time_show = df_time_show.drop(columns=["_label"])
+    df_time_show["Ngày"] = week_label_from_anchor(df_time_show["Ngày"])
 else:
     df_time_show["Ngày"] = pd.to_datetime(df_time_show["Ngày"], errors="coerce").dt.strftime("%Y-%m-%d")
 
@@ -385,7 +354,6 @@ df_region_time = group_region_time(df_f_time)
 
 st.subheader(f"🌍 Theo Region + {time_type}")
 df_region_time_show = df_region_time.copy()
-df_region_time_show["Time"] = df_region_time_show["Time"].astype(str)
 
 for c in ["Gross", "Net", "Orders", "Customers"]:
     if c in df_region_time_show.columns:
@@ -440,8 +408,6 @@ if nhom_sp_selected and "Nhóm_hàng" in df_product.columns:
 if ma_nb_selected and "Mã_NB" in df_product.columns:
     df_product = df_product[df_product["Mã_NB"].isin(ma_nb_selected)]
 
-# NOTE: bạn đang dùng Orders=("Số_lượng","sum") => chỉ chạy nếu có cột Số_lượng
-# Nếu không có, đổi lại Số_CT nunique
 if "Số_lượng" in df_product.columns:
     orders_agg = ("Số_lượng", "sum")
 else:
