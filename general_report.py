@@ -43,6 +43,24 @@ def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # =====================================================
+# WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ TUỲ CHỌN)
+# =====================================================
+def week_anchor(dt: pd.Series, week_start: int) -> pd.Series:
+    """
+    Trả về ngày "neo" của tuần theo week_start (0=Mon ... 6=Sun), normalize về 00:00:00
+    """
+    d = pd.to_datetime(dt)
+    return (d - pd.to_timedelta((d.dt.weekday - week_start) % 7, unit="D")).dt.normalize()
+
+def week_label_from_anchor(anchor: pd.Series) -> pd.Series:
+    """
+    Tạo label dạng 'Tuần WW/YYYY' dựa trên anchor.
+    Dùng ISO week-year của chính anchor để ổn định.
+    """
+    iso = pd.to_datetime(anchor).dt.isocalendar()
+    return "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
+
+# =====================================================
 # FILTER HELPERS (GỌN + LINH HOẠT + ALL + RESET)
 # =====================================================
 GEN_PREFIX = "gen_"
@@ -64,11 +82,9 @@ def ms_all(key: str, label: str, options, all_label="All", default_all=True):
     opts = sorted(opts.unique().tolist())
     ui_opts = [all_label] + opts
 
-    # init BEFORE widget
     if key not in st.session_state:
         st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
 
-    # sanitize BEFORE widget
     cur = [str(x).strip() for x in st.session_state.get(key, []) if str(x).strip() in ui_opts]
     if not cur:
         cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
@@ -161,6 +177,19 @@ with st.sidebar:
         key=GEN_PREFIX + "time_type",
     )
 
+    # ✅ TUẦN BẮT ĐẦU THEO THỨ (CHỈ DÙNG KHI time_type == 'Tuần')
+    week_start_label = st.selectbox(
+        "Tuần bắt đầu từ thứ",
+        ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
+        index=0,
+        key=GEN_PREFIX + "week_start",
+    )
+    WEEKDAY_MAP = {
+        "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
+        "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
+    }
+    WEEK_START = WEEKDAY_MAP[week_start_label]
+
     start_date = st.date_input(
         "Từ ngày",
         df["Ngày"].min().date(),
@@ -226,18 +255,24 @@ if df_f.empty:
     st.stop()
 
 # =====================================================
-# TIME COLUMN
+# TIME COLUMN (TUẦN ĂN THEO THỨ TUỲ CHỌN)
 # =====================================================
 df_f_time = df_f.copy()
+
 if time_type == "Ngày":
     df_f_time["Time"] = df_f_time["Ngày"].dt.date.astype(str)
+
 elif time_type == "Tuần":
-    iso = df_f_time["Ngày"].dt.isocalendar()
-    df_f_time["Time"] = ("Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str))
+    # ✅ neo tuần theo thứ chọn + label Tuần WW/YYYY
+    df_f_time["_WeekAnchor"] = week_anchor(df_f_time["Ngày"], WEEK_START)
+    df_f_time["Time"] = week_label_from_anchor(df_f_time["_WeekAnchor"])
+
 elif time_type == "Tháng":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
+
 elif time_type == "Quý":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
+
 elif time_type == "Năm":
     df_f_time["Time"] = df_f_time["Ngày"].dt.year.astype(str)
 
@@ -258,31 +293,57 @@ c4.metric("Đơn hàng", value=f"{orders:,}")
 c5.metric("Khách hàng", value=f"{customers:,}")
 
 # =====================================================
-# TIME GROUP
+# TIME GROUP (TUẦN: group theo anchor, KHÔNG resample('W'))
 # =====================================================
-def group_time(df_in: pd.DataFrame, tt: str) -> pd.DataFrame:
-    freq_map = {"Ngày": "D", "Tuần": "W", "Tháng": "ME", "Quý": "Q", "Năm": "Y"}
-    d = (
-        df_in.set_index("Ngày")
-        .resample(freq_map[tt])
-        .agg(
-            Gross=("Tổng_Gross", "sum"),
-            Net=("Tổng_Net", "sum"),
-            Orders=("Số_CT", "nunique"),
-            Customers=("Số_điện_thoại", "nunique"),
+def group_time(df_in: pd.DataFrame, tt: str, week_start: int) -> pd.DataFrame:
+    if tt == "Tuần":
+        tmp = df_in.copy()
+        tmp["_WeekAnchor"] = week_anchor(tmp["Ngày"], week_start)
+
+        d = (
+            tmp.groupby("_WeekAnchor", dropna=False)
+            .agg(
+                Gross=("Tổng_Gross", "sum"),
+                Net=("Tổng_Net", "sum"),
+                Orders=("Số_CT", "nunique"),
+                Customers=("Số_điện_thoại", "nunique"),
+            )
+            .reset_index()
+            .rename(columns={"_WeekAnchor": "Ngày"})
+            .sort_values("Ngày")
         )
-        .reset_index()
-    )
+    else:
+        freq_map = {"Ngày": "D", "Tháng": "ME", "Quý": "Q", "Năm": "Y"}
+        d = (
+            df_in.set_index("Ngày")
+            .resample(freq_map[tt])
+            .agg(
+                Gross=("Tổng_Gross", "sum"),
+                Net=("Tổng_Net", "sum"),
+                Orders=("Số_CT", "nunique"),
+                Customers=("Số_điện_thoại", "nunique"),
+            )
+            .reset_index()
+            .sort_values("Ngày")
+        )
+
     d["CK_%"] = np.where(d["Gross"] > 0, (1 - d["Net"] / d["Gross"]) * 100, 0)
     d["Net_prev"] = d["Net"].shift(1)
     d["Growth_%"] = np.where(d["Net_prev"] > 0, (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100, 0)
     return d
 
-df_time = group_time(df_f, time_type)
+df_time = group_time(df_f, time_type, WEEK_START)
 
 st.subheader(f"⏱ Theo thời gian ({time_type})")
 df_time_show = df_time.copy()
-df_time_show["Ngày"] = pd.to_datetime(df_time_show["Ngày"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+if time_type == "Tuần":
+    # ✅ hiển thị dạng 'Tuần WW/YYYY' cho bảng thời gian
+    df_time_show["_label"] = week_label_from_anchor(df_time_show["Ngày"])
+    df_time_show["Ngày"] = df_time_show["_label"]
+    df_time_show = df_time_show.drop(columns=["_label"])
+else:
+    df_time_show["Ngày"] = pd.to_datetime(df_time_show["Ngày"], errors="coerce").dt.strftime("%Y-%m-%d")
 
 for c in ["Gross", "Net", "Orders", "Customers", "Net_prev"]:
     if c in df_time_show.columns:
@@ -370,12 +431,19 @@ if nhom_sp_selected and "Nhóm_hàng" in df_product.columns:
 if ma_nb_selected and "Mã_NB" in df_product.columns:
     df_product = df_product[df_product["Mã_NB"].isin(ma_nb_selected)]
 
+# NOTE: bạn đang dùng Orders=("Số_lượng","sum") => chỉ chạy nếu có cột Số_lượng
+# Nếu không có, đổi lại Số_CT nunique
+if "Số_lượng" in df_product.columns:
+    orders_agg = ("Số_lượng", "sum")
+else:
+    orders_agg = ("Số_CT", "nunique")
+
 df_product_group = (
     df_product.groupby("Mã_NB", dropna=False)
     .agg(
         Gross=("Tổng_Gross", "sum"),
         Net=("Tổng_Net", "sum"),
-        Orders=("Số_lượng", "sum"),
+        Orders=orders_agg,
         Customers=("Số_điện_thoại", "nunique"),
     )
     .reset_index()
