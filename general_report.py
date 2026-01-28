@@ -42,8 +42,13 @@ def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # =====================================================
-# WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ TUỲ CHỌN)
+# WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ - RIÊNG GENERAL)
 # =====================================================
+WEEKDAY_MAP = {
+    "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
+    "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
+}
+
 def week_anchor(dt: pd.Series, week_start: int) -> pd.Series:
     d = pd.to_datetime(dt)
     return (d - pd.to_timedelta((d.dt.weekday - week_start) % 7, unit="D")).dt.normalize()
@@ -53,18 +58,12 @@ def week_label_from_anchor(anchor: pd.Series) -> pd.Series:
     return "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
 
 # =====================================================
-# FILTER HELPERS (GỌN + LINH HOẠT + ALL + RESET)
+# FILTER HELPERS (ALL + RESET)
 # =====================================================
 GEN_PREFIX = "gen_"
 
 def reset_by_prefix(prefix: str):
-    """
-    Reset các filter của trang theo prefix,
-    nhưng KHÔNG xoá key dùng chung toàn app (vd: app_week_start).
-    """
     for k in list(st.session_state.keys()):
-        if k == "app_week_start":
-            continue
         if k.startswith(prefix):
             st.session_state.pop(k, None)
     st.rerun()
@@ -116,7 +115,6 @@ with st.sidebar:
             key="parquet_uploader_main",
         )
 
-# Xử lý upload / reset
 if src_choice == "Upload file parquet từ máy" and uploaded_files:
     dfs = []
     for f in uploaded_files:
@@ -143,7 +141,6 @@ elif src_choice == "Quay lại dữ liệu mặc định":
     _ = get_active_data()
     st.success("↩ Đã quay lại dùng dữ liệu mặc định trên server")
 
-# Luôn lấy lại dữ liệu đang active
 df = get_active_data()
 st.sidebar.caption("🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default")))
 
@@ -155,13 +152,8 @@ if df.empty:
     st.stop()
 
 # =====================================================
-# SIDEBAR FILTER (GỌN + ALL + CASCADE + RESET)
+# SIDEBAR FILTER (GENERAL)
 # =====================================================
-WEEKDAY_MAP = {
-    "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
-    "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
-}
-
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
@@ -174,14 +166,16 @@ with st.sidebar:
         key=GEN_PREFIX + "time_type",
     )
 
-    # ✅ KEY CHUNG TOÀN APP (Revenue sẽ đọc key này)
-    week_start_label = st.selectbox(
-        "Tuần bắt đầu từ thứ",
-        ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
-        index=0,
-        key="app_week_start",
-    )
-    WEEK_START = WEEKDAY_MAP.get(week_start_label, 0)
+    # ✅ TUẦN RIÊNG GENERAL
+    if time_type == "Tuần":
+        gen_week_label = st.selectbox(
+            "Tuần bắt đầu từ thứ",
+            ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
+            key=GEN_PREFIX + "week_start",
+        )
+        GEN_WEEK_START = WEEKDAY_MAP[gen_week_label]
+    else:
+        GEN_WEEK_START = 0  # không dùng
 
     start_date = st.date_input(
         "Từ ngày",
@@ -241,19 +235,23 @@ if df_f.empty:
     st.stop()
 
 # =====================================================
-# TIME COLUMN (TUẦN ĂN THEO THỨ TUỲ CHỌN)
+# TIME COLUMN
 # =====================================================
 df_f_time = df_f.copy()
 
 if time_type == "Ngày":
     df_f_time["Time"] = df_f_time["Ngày"].dt.date.astype(str)
+
 elif time_type == "Tuần":
-    df_f_time["_WeekAnchor"] = week_anchor(df_f_time["Ngày"], WEEK_START)
+    df_f_time["_WeekAnchor"] = week_anchor(df_f_time["Ngày"], GEN_WEEK_START)
     df_f_time["Time"] = week_label_from_anchor(df_f_time["_WeekAnchor"])
+
 elif time_type == "Tháng":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
+
 elif time_type == "Quý":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
+
 elif time_type == "Năm":
     df_f_time["Time"] = df_f_time["Ngày"].dt.year.astype(str)
 
@@ -274,7 +272,7 @@ c4.metric("Đơn hàng", value=f"{orders:,}")
 c5.metric("Khách hàng", value=f"{customers:,}")
 
 # =====================================================
-# TIME GROUP (TUẦN: group theo anchor, KHÔNG resample('W'))
+# TIME GROUP (TUẦN: group theo anchor)
 # =====================================================
 def group_time(df_in: pd.DataFrame, tt: str, week_start: int) -> pd.DataFrame:
     if tt == "Tuần":
@@ -313,7 +311,7 @@ def group_time(df_in: pd.DataFrame, tt: str, week_start: int) -> pd.DataFrame:
     d["Growth_%"] = np.where(d["Net_prev"] > 0, (d["Net"] - d["Net_prev"]) / d["Net_prev"] * 100, 0)
     return d
 
-df_time = group_time(df_f, time_type, WEEK_START)
+df_time = group_time(df_f, time_type, GEN_WEEK_START)
 
 st.subheader(f"⏱ Theo thời gian ({time_type})")
 df_time_show = df_time.copy()
@@ -389,7 +387,7 @@ df_store_show["CK_%"] = df_store_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
 st.dataframe(df_store_show, use_container_width=True, hide_index=True)
 
 # =====================================================
-# PRODUCT SUMMARY
+# PRODUCT SUMMARY (THEO MÃ_NB)
 # =====================================================
 st.subheader("📦 Theo Nhóm SP / Mã NB")
 
