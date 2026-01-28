@@ -88,13 +88,17 @@ def ms_all(key: str, label: str, options, all_label="All", default_all=True):
 # =====================================================
 # WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ LẤY TỪ GENERAL)
 # =====================================================
+# =====================================================
+# WEEK START (DÙNG CHUNG TOÀN APP)
+# =====================================================
 WEEKDAY_MAP = {
     "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
     "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
 }
-# lấy lựa chọn từ General: key="gen_week_start"
-week_label = st.session_state.get("gen_week_start", "Thứ 2")
+
+week_label = st.session_state.get("app_week_start", "Thứ 2")  # ✅ đọc key chung
 WEEK_START = WEEKDAY_MAP.get(week_label, 0)
+
 
 def week_anchor(dt: pd.Series, week_start: int) -> pd.Series:
     """

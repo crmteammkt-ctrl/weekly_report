@@ -66,10 +66,17 @@ def week_label_from_anchor(anchor: pd.Series) -> pd.Series:
 GEN_PREFIX = "gen_"
 
 def reset_by_prefix(prefix: str):
+    """
+    Reset các filter của trang theo prefix,
+    nhưng KHÔNG xoá key dùng chung toàn app (vd: app_week_start).
+    """
     for k in list(st.session_state.keys()):
+        if k == "app_week_start":
+            continue
         if k.startswith(prefix):
             st.session_state.pop(k, None)
     st.rerun()
+
 
 def ms_all(key: str, label: str, options, all_label="All", default_all=True):
     """
@@ -179,16 +186,18 @@ with st.sidebar:
 
     # ✅ TUẦN BẮT ĐẦU THEO THỨ (CHỈ DÙNG KHI time_type == 'Tuần')
     week_start_label = st.selectbox(
-        "Tuần bắt đầu từ thứ",
-        ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
-        index=0,
-        key=GEN_PREFIX + "week_start",
-    )
-    WEEKDAY_MAP = {
-        "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
-        "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
-    }
-    WEEK_START = WEEKDAY_MAP[week_start_label]
+    "Tuần bắt đầu từ thứ",
+    ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
+    index=0,
+    key="app_week_start",  # ✅ KEY CHUNG TOÀN APP
+)
+
+WEEKDAY_MAP = {
+    "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
+    "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
+}
+WEEK_START = WEEKDAY_MAP.get(week_start_label, 0)
+
 
     start_date = st.date_input(
         "Từ ngày",
