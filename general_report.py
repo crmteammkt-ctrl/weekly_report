@@ -2,9 +2,9 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
+from io import BytesIO
 
 from load_data import get_active_data, set_active_data
-from filters_shared import GLOBAL_PREFIX, init_global_defaults, ms_all, reset_global_filters
 
 # =====================================================
 # FORMAT HELPERS
@@ -42,6 +42,63 @@ def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # =====================================================
+# EXPORT EXCEL
+# =====================================================
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Data")
+    return output.getvalue()
+
+# =====================================================
+# GLOBAL FILTER (CÁCH A) - KEY CHUNG TOÀN APP
+# =====================================================
+GLOBAL_PREFIX = "f_global_"
+
+def init_global_filters(df: pd.DataFrame):
+    """Đảm bảo các key filter CHUNG tồn tại, dù mở trang nào trước."""
+    if GLOBAL_PREFIX + "start_date" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "start_date"] = df["Ngày"].min().date()
+    if GLOBAL_PREFIX + "end_date" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "end_date"] = df["Ngày"].max().date()
+
+    if GLOBAL_PREFIX + "loaiCT" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "loaiCT"] = ["All"]
+    if GLOBAL_PREFIX + "brand" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "brand"] = ["All"]
+    if GLOBAL_PREFIX + "region" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "region"] = ["All"]
+    if GLOBAL_PREFIX + "store" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "store"] = ["All"]
+
+def reset_global_filters():
+    """Reset filter CHUNG (ảnh hưởng tất cả trang)."""
+    for k in list(st.session_state.keys()):
+        if k.startswith(GLOBAL_PREFIX):
+            st.session_state.pop(k, None)
+    st.rerun()
+
+def ms_all(key: str, label: str, options, all_label="All", default_all=True):
+    """Multiselect có All - an toàn khi options thay đổi."""
+    opts = pd.Series(list(options)).dropna().astype(str).str.strip()
+    opts = sorted(opts.unique().tolist())
+    ui_opts = [all_label] + opts
+
+    if key not in st.session_state:
+        st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
+
+    cur = [str(x).strip() for x in st.session_state.get(key, []) if str(x).strip() in ui_opts]
+    if not cur:
+        cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
+        st.session_state[key] = cur
+
+    selected = st.multiselect(label, options=ui_opts, key=key)
+
+    if (not selected) or (all_label in selected):
+        return opts
+    return [x for x in selected if x in opts]
+
+# =====================================================
 # WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ - RIÊNG GENERAL)
 # =====================================================
 WEEKDAY_MAP = {
@@ -58,7 +115,7 @@ def week_label_from_anchor(anchor: pd.Series) -> pd.Series:
     return "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
 
 # =====================================================
-# Page config
+# PAGE CONFIG
 # =====================================================
 st.set_page_config(page_title="Marketing Revenue Dashboard", layout="wide")
 st.title("📊 MARKETING REVENUE DASHBOARD – Tổng quan")
@@ -111,9 +168,6 @@ elif src_choice == "Quay lại dữ liệu mặc định":
     _ = get_active_data()
     st.success("↩ Đã quay lại dùng dữ liệu mặc định trên server")
 
-# =====================================================
-# LOAD DATA
-# =====================================================
 df = get_active_data()
 st.sidebar.caption("🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default")))
 
@@ -121,55 +175,65 @@ df = ensure_datetime(df)
 df = fix_numeric(df)
 
 if df.empty:
-    st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
+    st.warning("⚠ Không có dữ liệu để phân tích.")
     st.stop()
 
-# ✅ init filter CHUNG 1 lần
-init_global_defaults(df)
+# ✅ init GLOBAL FILTER để giữ trạng thái khi đổi trang
+init_global_filters(df)
 
 # =====================================================
-# SIDEBAR FILTER
-# - Filter CHUNG: f_global_*
-# - Filter RIÊNG General: gen_*
+# FILTER - GENERAL (RIÊNG TRANG)
 # =====================================================
+GEN_PREFIX = "gen_"
+
+def reset_general_only():
+    """Reset filter riêng trang General, KHÔNG đụng filter CHUNG."""
+    for k in list(st.session_state.keys()):
+        if k.startswith(GEN_PREFIX):
+            st.session_state.pop(k, None)
+    st.rerun()
+
 with st.sidebar:
-    st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
+    st.header("🎛️ Bộ lọc (General)")
 
-    # (tuỳ bạn) nút reset filter CHUNG toàn app
-    # nếu bạn không muốn có nút reset thì xoá 3 dòng này
-    if st.button("🔄 Reset bộ lọc (CHUNG)", use_container_width=True):
-        reset_global_filters()
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        if st.button("🔄 Reset CHUNG", use_container_width=True):
+            reset_global_filters()
+    with col_r2:
+        if st.button("🔄 Reset General", use_container_width=True):
+            reset_general_only()
 
     time_type = st.selectbox(
         "Phân tích theo",
         ["Ngày", "Tuần", "Tháng", "Quý", "Năm"],
-        key="gen_time_type",
+        key=GEN_PREFIX + "time_type",
     )
 
-    # ✅ tuần riêng general
+    # ✅ tuần riêng General
     if time_type == "Tuần":
         gen_week_label = st.selectbox(
             "Tuần bắt đầu từ thứ",
             ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
-            key="gen_week_start",
+            key=GEN_PREFIX + "week_start",
         )
         GEN_WEEK_START = WEEKDAY_MAP[gen_week_label]
     else:
         GEN_WEEK_START = 0
 
-    # ✅ date chung toàn app
+    # ✅ date CHUNG
     start_date = st.date_input(
         "Từ ngày",
-        st.session_state[GLOBAL_PREFIX + "start_date"],
+        value=st.session_state[GLOBAL_PREFIX + "start_date"],
         key=GLOBAL_PREFIX + "start_date",
     )
     end_date = st.date_input(
         "Đến ngày",
-        st.session_state[GLOBAL_PREFIX + "end_date"],
+        value=st.session_state[GLOBAL_PREFIX + "end_date"],
         key=GLOBAL_PREFIX + "end_date",
     )
 
-    # ✅ filter CHUNG toàn app
+    # ✅ filter CHUNG
     loaiCT_filter = ms_all(
         key=GLOBAL_PREFIX + "loaiCT",
         label="Loại CT",
@@ -197,7 +261,7 @@ with st.sidebar:
     )
 
 # =====================================================
-# APPLY FILTER (CHUNG)
+# APPLY FILTER (dùng filter CHUNG)
 # =====================================================
 mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
 
@@ -301,6 +365,7 @@ else:
 for c in ["Gross", "Net", "Orders", "Customers", "Net_prev"]:
     if c in df_time_show.columns:
         df_time_show[c] = df_time_show[c].apply(fmt_int)
+
 for c in ["CK_%", "Growth_%"]:
     if c in df_time_show.columns:
         df_time_show[c] = df_time_show[c].apply(lambda v: fmt_pct(v, 2, with_sign=(c == "Growth_%")))
@@ -311,7 +376,6 @@ st.dataframe(df_time_show, use_container_width=True, hide_index=True)
 # REGION + TIME
 # =====================================================
 st.subheader(f"🌍 Theo Region + {time_type}")
-
 df_region_time = (
     df_f_time.groupby(["Time", "Region"], dropna=False)
     .agg(
@@ -322,22 +386,18 @@ df_region_time = (
     )
     .reset_index()
 )
-
 df_region_time["CK_%"] = np.where(df_region_time["Gross"] > 0, (df_region_time["Gross"] - df_region_time["Net"]) / df_region_time["Gross"] * 100, 0)
-df_region_time = df_region_time.sort_values(["Time", "Net"], ascending=[True, False])
 
-df_region_time_show = df_region_time.copy()
+df_region_time_show = df_region_time.sort_values(["Time", "Net"], ascending=[True, False]).copy()
 for c in ["Gross", "Net", "Orders", "Customers"]:
     df_region_time_show[c] = df_region_time_show[c].apply(fmt_int)
 df_region_time_show["CK_%"] = df_region_time_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
-
 st.dataframe(df_region_time_show, use_container_width=True, hide_index=True)
 
 # =====================================================
 # STORE SUMMARY
 # =====================================================
 st.subheader("🏪 Tổng quan theo Cửa hàng")
-
 df_store = (
     df_f.groupby("Điểm_mua_hàng", dropna=False)
     .agg(
@@ -348,30 +408,27 @@ df_store = (
     )
     .reset_index()
 )
-
 df_store["CK_%"] = np.where(df_store["Gross"] > 0, (df_store["Gross"] - df_store["Net"]) / df_store["Gross"] * 100, 0)
 
 df_store_show = df_store.sort_values("Net", ascending=False).copy()
 for c in ["Gross", "Net", "Orders", "Customers"]:
     df_store_show[c] = df_store_show[c].apply(fmt_int)
 df_store_show["CK_%"] = df_store_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
-
 st.dataframe(df_store_show, use_container_width=True, hide_index=True)
 
 # =====================================================
-# PRODUCT SUMMARY (THEO MÃ_NB) - RIÊNG GENERAL
+# PRODUCT SUMMARY (THEO MÃ_NB)
 # =====================================================
 st.subheader("📦 Theo Nhóm SP / Mã NB")
-
 df_product = df_f.copy()
 
 col1, col2 = st.columns(2)
 with col1:
     nhom_vals = sorted(df_product["Nhóm_hàng"].dropna().unique()) if "Nhóm_hàng" in df_product.columns else []
-    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals, key="gen_nhom_sp")
+    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals, key=GEN_PREFIX + "nhom_sp")
 with col2:
     ma_vals = sorted(df_product["Mã_NB"].dropna().unique()) if "Mã_NB" in df_product.columns else []
-    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals, key="gen_ma_nb")
+    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals, key=GEN_PREFIX + "ma_nb")
 
 if nhom_sp_selected and "Nhóm_hàng" in df_product.columns:
     df_product = df_product[df_product["Nhóm_hàng"].isin(nhom_sp_selected)]

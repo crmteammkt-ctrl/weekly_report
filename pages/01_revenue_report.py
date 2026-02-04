@@ -5,7 +5,6 @@ import streamlit as st
 import plotly.express as px
 
 from load_data import get_active_data
-from filters_shared import GLOBAL_PREFIX, init_global_defaults, ms_all, reset_global_filters
 
 # =====================================================
 # FORMAT HELPERS
@@ -48,6 +47,52 @@ def show_df(df_show: pd.DataFrame, title=None):
     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
 # =====================================================
+# GLOBAL FILTER (CÁCH A) - KEY CHUNG TOÀN APP
+# =====================================================
+GLOBAL_PREFIX = "f_global_"
+
+def init_global_filters(df: pd.DataFrame):
+    # ✅ fix KeyError: mở thẳng Revenue vẫn có key
+    if GLOBAL_PREFIX + "start_date" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "start_date"] = df["Ngày"].min().date()
+    if GLOBAL_PREFIX + "end_date" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "end_date"] = df["Ngày"].max().date()
+
+    if GLOBAL_PREFIX + "loaiCT" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "loaiCT"] = ["All"]
+    if GLOBAL_PREFIX + "brand" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "brand"] = ["All"]
+    if GLOBAL_PREFIX + "region" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "region"] = ["All"]
+    if GLOBAL_PREFIX + "store" not in st.session_state:
+        st.session_state[GLOBAL_PREFIX + "store"] = ["All"]
+
+def reset_global_filters():
+    for k in list(st.session_state.keys()):
+        if k.startswith(GLOBAL_PREFIX):
+            st.session_state.pop(k, None)
+    st.rerun()
+
+def ms_all(key: str, label: str, options, all_label="All", default_all=True):
+    opts = pd.Series(list(options)).dropna().astype(str).str.strip()
+    opts = sorted(opts.unique().tolist())
+    ui_opts = [all_label] + opts
+
+    if key not in st.session_state:
+        st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
+
+    cur = [str(x).strip() for x in st.session_state.get(key, []) if str(x).strip() in ui_opts]
+    if not cur:
+        cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
+        st.session_state[key] = cur
+
+    selected = st.multiselect(label, options=ui_opts, key=key)
+
+    if (not selected) or (all_label in selected):
+        return opts
+    return [x for x in selected if x in opts]
+
+# =====================================================
 # WEEK HELPERS (TUẦN BẮT ĐẦU THEO THỨ - RIÊNG REVENUE)
 # =====================================================
 WEEKDAY_MAP = {
@@ -78,25 +123,35 @@ if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích.")
     st.stop()
 
-# ✅ init filter CHUNG 1 lần (giữ filter khi đổi trang)
-init_global_defaults(df)
+# ✅ init GLOBAL FILTER để không bị KeyError + giữ filter khi đổi trang
+init_global_filters(df)
 
 # =====================================================
-# SIDEBAR FILTER
-# - CHUNG toàn app: f_global_*
-# - RIÊNG revenue: rev_*
+# FILTER - REVENUE (RIÊNG TRANG)
 # =====================================================
+REV_PREFIX = "rev_"
+
+def reset_revenue_only():
+    for k in list(st.session_state.keys()):
+        if k.startswith(REV_PREFIX):
+            st.session_state.pop(k, None)
+    st.rerun()
+
 with st.sidebar:
-    st.header("🎛 Bộ lọc dữ liệu (Revenue)")
+    st.header("🎛 Bộ lọc (Revenue)")
 
-    # (tuỳ bạn) reset filter CHUNG toàn app
-    if st.button("🔄 Reset bộ lọc (CHUNG)", use_container_width=True):
-        reset_global_filters()
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        if st.button("🔄 Reset CHUNG", use_container_width=True):
+            reset_global_filters()
+    with col_r2:
+        if st.button("🔄 Reset Revenue", use_container_width=True):
+            reset_revenue_only()
 
     time_grain = st.selectbox(
         "Phân tích theo",
         ["Ngày", "Tuần", "Tháng", "Quý"],
-        key="rev_time_grain",
+        key=REV_PREFIX + "time_grain",
     )
 
     # ✅ tuần riêng Revenue
@@ -104,25 +159,25 @@ with st.sidebar:
         rev_week_label = st.selectbox(
             "Tuần bắt đầu từ thứ",
             ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
-            key="rev_week_start",
+            key=REV_PREFIX + "week_start",
         )
         REV_WEEK_START = WEEKDAY_MAP[rev_week_label]
     else:
         REV_WEEK_START = 0
 
-    # ✅ date CHUNG toàn app
+    # ✅ date CHUNG
     start_date = st.date_input(
         "Từ ngày",
-        st.session_state[GLOBAL_PREFIX + "start_date"],
+        value=st.session_state[GLOBAL_PREFIX + "start_date"],
         key=GLOBAL_PREFIX + "start_date",
     )
     end_date = st.date_input(
         "Đến ngày",
-        st.session_state[GLOBAL_PREFIX + "end_date"],
+        value=st.session_state[GLOBAL_PREFIX + "end_date"],
         key=GLOBAL_PREFIX + "end_date",
     )
 
-    # ✅ filter CHUNG toàn app
+    # ✅ filter CHUNG
     loaict_filter = ms_all(
         key=GLOBAL_PREFIX + "loaiCT",
         label="LoaiCT",
@@ -151,19 +206,19 @@ with st.sidebar:
 
     # ✅ filter RIÊNG revenue
     checksdt_filter = ms_all(
-        key="rev_checksdt",
+        key=REV_PREFIX + "checksdt",
         label="Trạng_thái_số_điện_thoại",
         options=df["Trạng_thái_số_điện_thoại"] if "Trạng_thái_số_điện_thoại" in df.columns else [],
     )
 
     checkten_filter = ms_all(
-        key="rev_checkten",
+        key=REV_PREFIX + "checkten",
         label="Kiểm_tra_tên",
         options=df["Kiểm_tra_tên"] if "Kiểm_tra_tên" in df.columns else [],
     )
 
 # =====================================================
-# APPLY FILTER
+# APPLY FILTER (dùng filter CHUNG + riêng Revenue)
 # =====================================================
 mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
 
@@ -381,7 +436,7 @@ st.markdown("### 🔍 Chọn kỳ để xem bảng Region")
 if time_grain == "Ngày":
     periods = df_summary[["Key"]].drop_duplicates().sort_values("Key").copy()
     periods["label"] = pd.to_datetime(periods["Key"], errors="coerce").dt.strftime("%Y-%m-%d")
-    sel_label = st.selectbox("Kỳ (Ngày)", periods["label"].tolist(), index=len(periods) - 1, key="rev_region_period")
+    sel_label = st.selectbox("Kỳ (Ngày)", periods["label"].tolist(), index=len(periods) - 1, key=REV_PREFIX + "region_period")
     sel_key = periods.loc[periods["label"] == sel_label, "Key"].iloc[0]
     region_mask = grouped_region["Key"] == sel_key
 else:
@@ -393,15 +448,15 @@ else:
     else:
         periods["label"] = periods.apply(lambda r: f"Q{int(r['Key'])} {int(r['Year'])}", axis=1)
 
-    sel_label = st.selectbox("Kỳ", periods["label"].tolist(), index=len(periods) - 1, key="rev_region_period")
+    sel_label = st.selectbox("Kỳ", periods["label"].tolist(), index=len(periods) - 1, key=REV_PREFIX + "region_period")
     row = periods.loc[periods["label"] == sel_label].iloc[0]
     sel_year = int(row["Year"])
     sel_key = int(row["Key"])
     region_mask = (grouped_region["Year"] == sel_year) & (grouped_region["Key"] == sel_key)
 
 df_region_view = grouped_region.loc[region_mask].copy().sort_values("Tổng_Net", ascending=False)
-
 df_region_show = df_region_view.copy()
+
 if time_grain == "Ngày":
     df_region_show["Kỳ"] = pd.to_datetime(df_region_show["Key"], errors="coerce").dt.strftime("%Y-%m-%d")
 else:
@@ -412,21 +467,15 @@ else:
     else:
         df_region_show["Kỳ"] = df_region_show.apply(lambda r: f"Q{int(r['Key'])} {int(r['Year'])}", axis=1)
 
-for c in [
-    "Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng",
-    "Prev_Tổng_Gross", "Prev_Tổng_Net", "Prev_Số_KH", "Prev_Số_đơn_hàng"
-]:
+for c in ["Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Prev_Tổng_Net"]:
     if c in df_region_show.columns:
         df_region_show[c] = df_region_show[c].apply(fmt_int)
 
-for c in ["Tỷ_lệ_CK (%)", "%_So_sánh_Tổng_Gross", "%_So_sánh_Tổng_Net", "%_So_sánh_Số_KH", "%_So_sánh_Số_đơn_hàng"]:
+for c in ["Tỷ_lệ_CK (%)", "%_So_sánh_Tổng_Net"]:
     if c in df_region_show.columns:
         df_region_show[c] = df_region_show[c].apply(lambda v: fmt_pct(v, 2, with_sign=c.startswith("%_So_sánh")))
 
-region_cols = [
-    "Kỳ", "Region", "Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng",
-    "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "%_So_sánh_Tổng_Net"
-]
+region_cols = ["Kỳ", "Region", "Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "%_So_sánh_Tổng_Net"]
 region_cols = [c for c in region_cols if c in df_region_show.columns]
 show_df(df_region_show[region_cols], title=None)
 
@@ -439,7 +488,7 @@ st.markdown("### 🔍 Chọn kỳ để xem Top/Bottom")
 if time_grain == "Ngày":
     period_df = df_summary[["Key"]].drop_duplicates().sort_values("Key").copy()
     period_df["label"] = pd.to_datetime(period_df["Key"], errors="coerce").dt.strftime("%Y-%m-%d")
-    sel_label2 = st.selectbox("Kỳ (Ngày)", period_df["label"].tolist(), index=len(period_df) - 1, key="rev_store_period")
+    sel_label2 = st.selectbox("Kỳ (Ngày)", period_df["label"].tolist(), index=len(period_df) - 1, key=REV_PREFIX + "store_period")
     sel_key2 = period_df.loc[period_df["label"] == sel_label2, "Key"].iloc[0]
     top10 = top_bottom_store(df_filtered, time_grain, REV_WEEK_START, top=True, key=sel_key2)
     bottom10 = top_bottom_store(df_filtered, time_grain, REV_WEEK_START, top=False, key=sel_key2)
@@ -452,7 +501,7 @@ else:
     else:
         period_df["label"] = period_df.apply(lambda r: f"Q{int(r['Key'])} {int(r['Year'])}", axis=1)
 
-    sel_label2 = st.selectbox("Kỳ", period_df["label"].tolist(), index=len(period_df) - 1, key="rev_store_period")
+    sel_label2 = st.selectbox("Kỳ", period_df["label"].tolist(), index=len(period_df) - 1, key=REV_PREFIX + "store_period")
     row2 = period_df.loc[period_df["label"] == sel_label2].iloc[0]
     sel_year2 = int(row2["Year"])
     sel_key2 = int(row2["Key"])
@@ -493,14 +542,8 @@ bottom10_show = format_store_table(bottom10)
 colA, colB = st.columns(2)
 with colA:
     st.markdown("### 🏆 Top 10 Điểm mua hàng")
-    if top10_show.empty:
-        st.info("Không có dữ liệu.")
-    else:
-        st.dataframe(top10_show, use_container_width=True, hide_index=True)
+    st.dataframe(top10_show, use_container_width=True, hide_index=True)
 
 with colB:
     st.markdown("### 📉 Bottom 10 Điểm mua hàng")
-    if bottom10_show.empty:
-        st.info("Không có dữ liệu.")
-    else:
-        st.dataframe(bottom10_show, use_container_width=True, hide_index=True)
+    st.dataframe(bottom10_show, use_container_width=True, hide_index=True)
