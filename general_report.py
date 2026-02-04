@@ -2,9 +2,9 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
-from io import BytesIO
 
 from load_data import get_active_data, set_active_data
+from filters_shared import GLOBAL_PREFIX, init_global_defaults, ms_all, reset_global_filters
 
 # =====================================================
 # FORMAT HELPERS
@@ -56,36 +56,6 @@ def week_anchor(dt: pd.Series, week_start: int) -> pd.Series:
 def week_label_from_anchor(anchor: pd.Series) -> pd.Series:
     iso = pd.to_datetime(anchor).dt.isocalendar()
     return "Tuần " + iso["week"].astype(str).str.zfill(2) + "/" + iso["year"].astype(str)
-
-# =====================================================
-# FILTER HELPERS (ALL + RESET)
-# =====================================================
-GEN_PREFIX = "gen_"
-
-def reset_by_prefix(prefix: str):
-    for k in list(st.session_state.keys()):
-        if k.startswith(prefix):
-            st.session_state.pop(k, None)
-    st.rerun()
-
-def ms_all(key: str, label: str, options, all_label="All", default_all=True):
-    opts = pd.Series(list(options)).dropna().astype(str).str.strip()
-    opts = sorted(opts.unique().tolist())
-    ui_opts = [all_label] + opts
-
-    if key not in st.session_state:
-        st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
-
-    cur = [str(x).strip() for x in st.session_state.get(key, []) if str(x).strip() in ui_opts]
-    if not cur:
-        cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
-        st.session_state[key] = cur
-
-    selected = st.multiselect(label, options=ui_opts, key=key)
-
-    if (not selected) or (all_label in selected):
-        return opts
-    return [x for x in selected if x in opts]
 
 # =====================================================
 # Page config
@@ -141,6 +111,9 @@ elif src_choice == "Quay lại dữ liệu mặc định":
     _ = get_active_data()
     st.success("↩ Đã quay lại dùng dữ liệu mặc định trên server")
 
+# =====================================================
+# LOAD DATA
+# =====================================================
 df = get_active_data()
 st.sidebar.caption("🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default")))
 
@@ -151,71 +124,80 @@ if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
     st.stop()
 
+# ✅ init filter CHUNG 1 lần
+init_global_defaults(df)
+
 # =====================================================
-# SIDEBAR FILTER (GENERAL)
+# SIDEBAR FILTER
+# - Filter CHUNG: f_global_*
+# - Filter RIÊNG General: gen_*
 # =====================================================
 with st.sidebar:
     st.header("🎛️ Bộ lọc dữ liệu (Tổng quan)")
 
-    if st.button("🔄 Reset bộ lọc (General)", use_container_width=True):
-        reset_by_prefix(GEN_PREFIX)
+    # (tuỳ bạn) nút reset filter CHUNG toàn app
+    # nếu bạn không muốn có nút reset thì xoá 3 dòng này
+    if st.button("🔄 Reset bộ lọc (CHUNG)", use_container_width=True):
+        reset_global_filters()
 
     time_type = st.selectbox(
         "Phân tích theo",
         ["Ngày", "Tuần", "Tháng", "Quý", "Năm"],
-        key=GEN_PREFIX + "time_type",
+        key="gen_time_type",
     )
 
-    # ✅ TUẦN RIÊNG GENERAL
+    # ✅ tuần riêng general
     if time_type == "Tuần":
         gen_week_label = st.selectbox(
             "Tuần bắt đầu từ thứ",
             ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"],
-            key=GEN_PREFIX + "week_start",
+            key="gen_week_start",
         )
         GEN_WEEK_START = WEEKDAY_MAP[gen_week_label]
     else:
-        GEN_WEEK_START = 0  # không dùng
+        GEN_WEEK_START = 0
 
+    # ✅ date chung toàn app
     start_date = st.date_input(
         "Từ ngày",
-        df["Ngày"].min().date(),
-        key=GEN_PREFIX + "start_date",
+        st.session_state[GLOBAL_PREFIX + "start_date"],
+        key=GLOBAL_PREFIX + "start_date",
     )
     end_date = st.date_input(
         "Đến ngày",
-        df["Ngày"].max().date(),
-        key=GEN_PREFIX + "end_date",
+        st.session_state[GLOBAL_PREFIX + "end_date"],
+        key=GLOBAL_PREFIX + "end_date",
     )
 
+    # ✅ filter CHUNG toàn app
     loaiCT_filter = ms_all(
-        key=GEN_PREFIX + "loaiCT",
+        key=GLOBAL_PREFIX + "loaiCT",
         label="Loại CT",
         options=df["LoaiCT"] if "LoaiCT" in df.columns else [],
     )
 
     brand_filter = ms_all(
-        key=GEN_PREFIX + "brand",
+        key=GLOBAL_PREFIX + "brand",
         label="Brand",
         options=df["Brand"] if "Brand" in df.columns else [],
     )
 
     df_brand = df[df["Brand"].isin(brand_filter)] if (brand_filter and "Brand" in df.columns) else df.iloc[0:0]
     region_filter = ms_all(
-        key=GEN_PREFIX + "region",
+        key=GLOBAL_PREFIX + "region",
         label="Region",
         options=df_brand["Region"] if "Region" in df_brand.columns else [],
     )
 
     df_brand_region = df_brand[df_brand["Region"].isin(region_filter)] if (region_filter and "Region" in df_brand.columns) else df_brand.iloc[0:0]
     store_filter = ms_all(
-        key=GEN_PREFIX + "store",
+        key=GLOBAL_PREFIX + "store",
         label="Cửa hàng",
         options=df_brand_region["Điểm_mua_hàng"] if "Điểm_mua_hàng" in df_brand_region.columns else [],
     )
 
 # =====================================================
-# APPLY FILTER
+# APPLY FILTER (CHUNG)
 # =====================================================
 mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
 
@@ -241,17 +223,13 @@ df_f_time = df_f.copy()
 
 if time_type == "Ngày":
     df_f_time["Time"] = df_f_time["Ngày"].dt.date.astype(str)
-
 elif time_type == "Tuần":
     df_f_time["_WeekAnchor"] = week_anchor(df_f_time["Ngày"], GEN_WEEK_START)
     df_f_time["Time"] = week_label_from_anchor(df_f_time["_WeekAnchor"])
-
 elif time_type == "Tháng":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("M").astype(str)
-
 elif time_type == "Quý":
     df_f_time["Time"] = df_f_time["Ngày"].dt.to_period("Q").astype(str)
-
 elif time_type == "Năm":
     df_f_time["Time"] = df_f_time["Ngày"].dt.year.astype(str)
 
@@ -278,7 +256,6 @@ def group_time(df_in: pd.DataFrame, tt: str, week_start: int) -> pd.DataFrame:
     if tt == "Tuần":
         tmp = df_in.copy()
         tmp["_WeekAnchor"] = week_anchor(tmp["Ngày"], week_start)
-
         d = (
             tmp.groupby("_WeekAnchor", dropna=False)
             .agg(
@@ -324,7 +301,6 @@ else:
 for c in ["Gross", "Net", "Orders", "Customers", "Net_prev"]:
     if c in df_time_show.columns:
         df_time_show[c] = df_time_show[c].apply(fmt_int)
-
 for c in ["CK_%", "Growth_%"]:
     if c in df_time_show.columns:
         df_time_show[c] = df_time_show[c].apply(lambda v: fmt_pct(v, 2, with_sign=(c == "Growth_%")))
@@ -334,30 +310,26 @@ st.dataframe(df_time_show, use_container_width=True, hide_index=True)
 # =====================================================
 # REGION + TIME
 # =====================================================
-def group_region_time(df_in: pd.DataFrame) -> pd.DataFrame:
-    d = (
-        df_in.groupby(["Time", "Region"], dropna=False)
-        .agg(
-            Gross=("Tổng_Gross", "sum"),
-            Net=("Tổng_Net", "sum"),
-            Orders=("Số_CT", "nunique"),
-            Customers=("Số_điện_thoại", "nunique"),
-        )
-        .reset_index()
-    )
-    d["CK_%"] = np.where(d["Gross"] > 0, (d["Gross"] - d["Net"]) / d["Gross"] * 100, 0)
-    return d.sort_values(["Time", "Net"], ascending=[True, False])
-
-df_region_time = group_region_time(df_f_time)
-
 st.subheader(f"🌍 Theo Region + {time_type}")
-df_region_time_show = df_region_time.copy()
 
+df_region_time = (
+    df_f_time.groupby(["Time", "Region"], dropna=False)
+    .agg(
+        Gross=("Tổng_Gross", "sum"),
+        Net=("Tổng_Net", "sum"),
+        Orders=("Số_CT", "nunique"),
+        Customers=("Số_điện_thoại", "nunique"),
+    )
+    .reset_index()
+)
+
+df_region_time["CK_%"] = np.where(df_region_time["Gross"] > 0, (df_region_time["Gross"] - df_region_time["Net"]) / df_region_time["Gross"] * 100, 0)
+df_region_time = df_region_time.sort_values(["Time", "Net"], ascending=[True, False])
+
+df_region_time_show = df_region_time.copy()
 for c in ["Gross", "Net", "Orders", "Customers"]:
-    if c in df_region_time_show.columns:
-        df_region_time_show[c] = df_region_time_show[c].apply(fmt_int)
-if "CK_%" in df_region_time_show.columns:
-    df_region_time_show["CK_%"] = df_region_time_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
+    df_region_time_show[c] = df_region_time_show[c].apply(fmt_int)
+df_region_time_show["CK_%"] = df_region_time_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
 
 st.dataframe(df_region_time_show, use_container_width=True, hide_index=True)
 
@@ -387,7 +359,7 @@ df_store_show["CK_%"] = df_store_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
 st.dataframe(df_store_show, use_container_width=True, hide_index=True)
 
 # =====================================================
-# PRODUCT SUMMARY (THEO MÃ_NB)
+# PRODUCT SUMMARY (THEO MÃ_NB) - RIÊNG GENERAL
 # =====================================================
 st.subheader("📦 Theo Nhóm SP / Mã NB")
 
@@ -396,20 +368,17 @@ df_product = df_f.copy()
 col1, col2 = st.columns(2)
 with col1:
     nhom_vals = sorted(df_product["Nhóm_hàng"].dropna().unique()) if "Nhóm_hàng" in df_product.columns else []
-    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals, key=GEN_PREFIX + "nhom_sp")
+    nhom_sp_selected = st.multiselect("📦 Chọn Nhóm SP", nhom_vals, key="gen_nhom_sp")
 with col2:
     ma_vals = sorted(df_product["Mã_NB"].dropna().unique()) if "Mã_NB" in df_product.columns else []
-    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals, key=GEN_PREFIX + "ma_nb")
+    ma_nb_selected = st.multiselect("🏷️ Chọn Mã NB", ma_vals, key="gen_ma_nb")
 
 if nhom_sp_selected and "Nhóm_hàng" in df_product.columns:
     df_product = df_product[df_product["Nhóm_hàng"].isin(nhom_sp_selected)]
 if ma_nb_selected and "Mã_NB" in df_product.columns:
     df_product = df_product[df_product["Mã_NB"].isin(ma_nb_selected)]
 
-if "Số_lượng" in df_product.columns:
-    orders_agg = ("Số_lượng", "sum")
-else:
-    orders_agg = ("Số_CT", "nunique")
+orders_agg = ("Số_lượng", "sum") if "Số_lượng" in df_product.columns else ("Số_CT", "nunique")
 
 df_product_group = (
     df_product.groupby("Mã_NB", dropna=False)
@@ -425,7 +394,6 @@ df_product_group = (
 
 df_product_show = df_product_group.copy()
 for c in ["Gross", "Net", "Orders", "Customers"]:
-    if c in df_product_show.columns:
-        df_product_show[c] = df_product_show[c].apply(fmt_int)
+    df_product_show[c] = df_product_show[c].apply(fmt_int)
 
 st.dataframe(df_product_show, use_container_width=True, hide_index=True)
