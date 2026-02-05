@@ -7,36 +7,43 @@ import plotly.express as px
 from load_data import get_active_data
 
 # =====================================================
-# PERF UTILS
+# FORMAT
 # =====================================================
 def fmt_int(x):
-    if pd.isna(x):
-        return ""
-    try:
-        return f"{float(x):,.0f}"
-    except Exception:
-        return ""
+    if pd.isna(x): return ""
+    try: return f"{float(x):,.0f}"
+    except: return ""
 
 def fmt_pct(x, decimals=2, with_sign=False):
-    if pd.isna(x):
-        return ""
+    if pd.isna(x): return ""
     try:
         v = float(x)
         s = f"{v:,.{decimals}f}%"
         if with_sign and v > 0:
             s = "+" + s
         return s
-    except Exception:
+    except:
         return ""
 
+# =====================================================
+# CLEAN + OPTIMIZE
+# =====================================================
 def ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
     if "Ngày" in df.columns:
         df["Ngày"] = pd.to_datetime(df["Ngày"], errors="coerce")
         df = df.dropna(subset=["Ngày"])
     return df
 
+def normalize_strings(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.strip()
+            df.loc[df[c].isin(["nan", "None", "NaT"]), c] = np.nan
+    return df
+
 def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     cat_cols = ["LoaiCT","Brand","Region","Điểm_mua_hàng","Kiểm_tra_tên","Trạng_thái_số_điện_thoại"]
+    df = normalize_strings(df, cat_cols + ["Số_điện_thoại"])
     for c in cat_cols:
         if c in df.columns:
             df[c] = df[c].astype("category")
@@ -47,17 +54,20 @@ def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
         df["Số_điện_thoại"] = df["Số_điện_thoại"].astype(str)
     return df
 
-# ============ Week helpers (riêng trang) ============
+# =====================================================
+# WEEK
+# =====================================================
 WEEKDAY_MAP = {
     "Thứ 2": 0, "Thứ 3": 1, "Thứ 4": 2, "Thứ 5": 3,
     "Thứ 6": 4, "Thứ 7": 5, "Chủ nhật": 6
 }
+
 def week_anchor(dt: pd.Series, week_start: int) -> pd.Series:
     d = pd.to_datetime(dt)
     return (d - pd.to_timedelta((d.dt.weekday - week_start) % 7, unit="D")).dt.normalize()
 
 # =====================================================
-# FILTER STATE
+# FILTER STATE (KHÔNG RESET KHI ĐỔI TRANG)
 # =====================================================
 REV = "rev_"
 
@@ -71,15 +81,15 @@ def init_defaults(df: pd.DataFrame):
         st.session_state.setdefault(REV + k, ["All"])
 
 def ms_all(key: str, label: str, options, all_label="All"):
-    opts = pd.Series(list(options)).dropna().astype(str)
+    opts = pd.Series(list(options)).dropna().astype(str).str.strip()
     opts = sorted(opts.unique().tolist())
     ui = [all_label] + opts
 
+    # sanitize state (NHƯNG KHÔNG TỰ GÁN LẠI DEFAULT TRỪ KHI RỖNG/INVALID)
     cur = st.session_state.get(key, [all_label])
-    cur = [x for x in cur if x in ui]
+    cur = [x for x in cur if str(x).strip() in ui]
     if not cur:
-        cur = [all_label]
-        st.session_state[key] = cur
+        st.session_state[key] = [all_label]
 
     st.multiselect(label, options=ui, key=key)
     selected = st.session_state.get(key, [all_label])
@@ -105,7 +115,7 @@ if df.empty:
 init_defaults(df)
 
 # =====================================================
-# SIDEBAR FILTER
+# SIDEBAR (TUYỆT ĐỐI KHÔNG DÙNG value=)
 # =====================================================
 with st.sidebar:
     st.header("🎛 Bộ lọc (Revenue)")
@@ -134,10 +144,16 @@ with st.sidebar:
     df_br = df_b[df_b["Region"].isin(region)] if ("Region" in df_b.columns and region) else df_b.iloc[0:0]
     store  = ms_all(REV + "store", "Điểm mua hàng", df_br["Điểm_mua_hàng"] if "Điểm_mua_hàng" in df_br.columns else [])
 
-    checksdt = ms_all(REV + "checksdt", "Trạng_thái_số_điện_thoại",
-                      df["Trạng_thái_số_điện_thoại"] if "Trạng_thái_số_điện_thoại" in df.columns else [])
-
-    checkten = ms_all(REV + "checkten", "Kiểm_tra_tên", df["Kiểm_tra_tên"] if "Kiểm_tra_tên" in df.columns else [])
+    checksdt = ms_all(
+        REV + "checksdt",
+        "Trạng_thái_số_điện_thoại",
+        df["Trạng_thái_số_điện_thoại"] if "Trạng_thái_số_điện_thoại" in df.columns else []
+    )
+    checkten = ms_all(
+        REV + "checkten",
+        "Kiểm_tra_tên",
+        df["Kiểm_tra_tên"] if "Kiểm_tra_tên" in df.columns else []
+    )
 
 week_start = WEEKDAY_MAP.get(st.session_state.get(REV + "week_start", "Thứ 2"), 0)
 
@@ -152,51 +168,52 @@ if "Điểm_mua_hàng" in df.columns: mask &= df["Điểm_mua_hàng"].isin(store
 if "Trạng_thái_số_điện_thoại" in df.columns: mask &= df["Trạng_thái_số_điện_thoại"].isin(checksdt)
 if "Kiểm_tra_tên" in df.columns: mask &= df["Kiểm_tra_tên"].isin(checkten)
 
-need_cols = [c for c in [
-    "Ngày","Region","Điểm_mua_hàng","Số_CT","Số_điện_thoại","Tổng_Gross","Tổng_Net"
-] if c in df.columns]
-
+need_cols = [c for c in ["Ngày","Region","Điểm_mua_hàng","Số_CT","Số_điện_thoại","Tổng_Gross","Tổng_Net"] if c in df.columns]
 df_f = df.loc[mask, need_cols]
+
 if df_f.empty:
     st.warning("⚠ Không có dữ liệu sau khi áp bộ lọc.")
     st.stop()
 
 # =====================================================
-# TIME KEY (vectorized - không apply row-wise)
+# TIME KEY (vectorized)
 # =====================================================
 def add_time_key(df_in: pd.DataFrame, grain: str):
     d = df_in.copy()
     if grain == "Ngày":
         d["Year"] = d["Ngày"].dt.year
         d["Key"]  = d["Ngày"].dt.normalize()
-        group_cols = ["Key"]
-        label = pd.to_datetime(d["Key"]).dt.strftime("%Y-%m-%d")
+        gcols = ["Key"]
+        d["Label"] = pd.to_datetime(d["Key"]).dt.strftime("%Y-%m-%d")
+
     elif grain == "Tuần":
         anch = week_anchor(d["Ngày"], week_start)
         iso = anch.dt.isocalendar()
         d["Year"] = iso["year"].astype(int)
         d["Key"]  = iso["week"].astype(int)
-        group_cols = ["Year","Key"]
-        label = "Tuần " + d["Key"].astype(str).str.zfill(2) + "/" + d["Year"].astype(str)
+        gcols = ["Year","Key"]
+        d["Label"] = "Tuần " + d["Key"].astype(str).str.zfill(2) + "/" + d["Year"].astype(str)
+
     elif grain == "Tháng":
         d["Year"] = d["Ngày"].dt.year
         d["Key"]  = d["Ngày"].dt.month.astype(int)
-        group_cols = ["Year","Key"]
-        label = d["Year"].astype(str) + "-" + d["Key"].astype(str).str.zfill(2)
+        gcols = ["Year","Key"]
+        d["Label"] = d["Year"].astype(str) + "-" + d["Key"].astype(str).str.zfill(2)
+
     else:  # Quý
         d["Year"] = d["Ngày"].dt.year
         d["Key"]  = d["Ngày"].dt.quarter.astype(int)
-        group_cols = ["Year","Key"]
-        label = "Q" + d["Key"].astype(str) + " " + d["Year"].astype(str)
-    d["Label"] = label
-    return d, group_cols
+        gcols = ["Year","Key"]
+        d["Label"] = "Q" + d["Key"].astype(str) + " " + d["Year"].astype(str)
 
-# =====================================================
-# SUMMARY (nhanh: groupby observed)
-# =====================================================
-st.subheader("📊 Tổng hợp doanh thu")
+    return d, gcols
 
 tmp, gcols = add_time_key(df_f, time_grain)
+
+# =====================================================
+# SUMMARY
+# =====================================================
+st.subheader("📊 Tổng hợp doanh thu")
 
 summary = (
     tmp.groupby(gcols, observed=True)
@@ -212,7 +229,6 @@ summary = (
 )
 
 summary["Tỷ_lệ_CK (%)"] = np.where(summary["Tổng_Gross"]!=0, (1 - summary["Tổng_Net"]/summary["Tổng_Gross"])*100, 0)
-
 summary["Prev_Tổng_Net"] = summary["Tổng_Net"].shift(1)
 summary["%_So_sánh_Tổng_Net"] = np.where(
     summary["Prev_Tổng_Net"]>0,
@@ -233,12 +249,10 @@ fig = px.line(summary, x="Label", y=["Tổng_Gross","Tổng_Net"], markers=True,
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
-# REGION VIEW (chọn kỳ)
+# REGION (chọn kỳ)
 # =====================================================
 st.subheader("🌍 Doanh thu theo Region")
-
-tmp_r = tmp[["Region","Year","Key","Label","Tổng_Gross","Tổng_Net","Số_điện_thoại","Số_CT"]].copy() if "Region" in tmp.columns else None
-if tmp_r is None:
+if "Region" not in tmp.columns:
     st.info("Thiếu cột Region.")
 else:
     reg = (
@@ -265,10 +279,9 @@ else:
     st.dataframe(reg_show, use_container_width=True, hide_index=True)
 
 # =====================================================
-# TOP/BOTTOM STORE (chọn kỳ)
+# TOP/BOTTOM 10 STORE (CÓ Prev_Net & %Change)
 # =====================================================
 st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
-
 if "Điểm_mua_hàng" not in tmp.columns:
     st.info("Thiếu cột Điểm_mua_hàng.")
 else:
@@ -281,23 +294,36 @@ else:
         )
         .reset_index()
     )
+
     store_g["Tỷ_lệ_CK (%)"] = np.where(store_g["Tổng_Gross"]!=0, (1 - store_g["Tổng_Net"]/store_g["Tổng_Gross"])*100, 0)
+
+    # ✅ sort theo thời gian + tính Prev/Change theo từng store
+    store_g = store_g.sort_values(["Điểm_mua_hàng"] + gcols)
+    store_g["Prev_Tổng_Net"] = store_g.groupby("Điểm_mua_hàng")["Tổng_Net"].shift(1)
+    store_g["Change%"] = np.where(
+        store_g["Prev_Tổng_Net"] > 0,
+        (store_g["Tổng_Net"] - store_g["Prev_Tổng_Net"]) / store_g["Prev_Tổng_Net"] * 100,
+        np.nan
+    )
 
     periods2 = summary["Label"].tolist()
     sel2 = st.selectbox("Chọn kỳ để xem Top/Bottom", periods2, index=len(periods2)-1, key=REV + "store_period")
 
     ss = store_g[store_g["Label"] == sel2].copy()
+
     top10 = ss.sort_values("Tổng_Net", ascending=False).head(10)
     bot10 = ss.sort_values("Tổng_Net", ascending=True).head(10)
 
     def show_store_table(d):
-        out = d[["Label","Điểm_mua_hàng","Tổng_Gross","Tổng_Net","Tỷ_lệ_CK (%)"]].rename(columns={"Label":"Kỳ"})
+        out = d[["Label","Điểm_mua_hàng","Tổng_Gross","Tổng_Net","Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"]].rename(columns={"Label":"Kỳ"})
         out["Tổng_Gross"] = out["Tổng_Gross"].apply(fmt_int)
         out["Tổng_Net"]   = out["Tổng_Net"].apply(fmt_int)
+        out["Prev_Tổng_Net"] = out["Prev_Tổng_Net"].apply(fmt_int)
         out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v,2))
+        out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v,2,with_sign=True))
         return out
 
-    c1,c2 = st.columns(2)
+    c1, c2 = st.columns(2)
     with c1:
         st.markdown("### 🏆 Top 10")
         st.dataframe(show_store_table(top10), use_container_width=True, hide_index=True)
