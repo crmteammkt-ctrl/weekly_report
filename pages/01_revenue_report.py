@@ -279,25 +279,30 @@ else:
     st.dataframe(reg_show, use_container_width=True, hide_index=True)
 
 # =====================================================
-# TOP/BOTTOM 10 STORE (CÓ Prev_Net & %Change)
+# =====================================================
+# TOP/BOTTOM 10 STORE (CÓ Prev_Net & %Change + Số_đơn_hàng)
 # =====================================================
 st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 if "Điểm_mua_hàng" not in tmp.columns:
     st.info("Thiếu cột Điểm_mua_hàng.")
 else:
     store_g = (
-        tmp.groupby(["Điểm_mua_hàng"] + gcols, observed=True)
+        tmp.groupby(["Điểm_mua_hàng"] + gcols, observed=True, sort=False)
         .agg(
             Label=("Label","first"),
             Tổng_Gross=("Tổng_Gross","sum"),
             Tổng_Net=("Tổng_Net","sum"),
+            Số_đơn_hàng=("Số_CT","nunique"),   # ✅ thêm
         )
         .reset_index()
     )
 
-    store_g["Tỷ_lệ_CK (%)"] = np.where(store_g["Tổng_Gross"]!=0, (1 - store_g["Tổng_Net"]/store_g["Tổng_Gross"])*100, 0)
+    store_g["Tỷ_lệ_CK (%)"] = np.where(
+        store_g["Tổng_Gross"]!=0,
+        (1 - store_g["Tổng_Net"]/store_g["Tổng_Gross"])*100,
+        0
+    )
 
-    # ✅ sort theo thời gian + tính Prev/Change theo từng store
     store_g = store_g.sort_values(["Điểm_mua_hàng"] + gcols)
     store_g["Prev_Tổng_Net"] = store_g.groupby("Điểm_mua_hàng")["Tổng_Net"].shift(1)
     store_g["Change%"] = np.where(
@@ -307,7 +312,12 @@ else:
     )
 
     periods2 = summary["Label"].tolist()
-    sel2 = st.selectbox("Chọn kỳ để xem Top/Bottom", periods2, index=len(periods2)-1, key=REV + "store_period")
+    sel2 = st.selectbox(
+        "Chọn kỳ để xem Top/Bottom",
+        periods2,
+        index=len(periods2)-1,
+        key=REV + "store_period"
+    )
 
     ss = store_g[store_g["Label"] == sel2].copy()
 
@@ -315,9 +325,15 @@ else:
     bot10 = ss.sort_values("Tổng_Net", ascending=True).head(10)
 
     def show_store_table(d):
-        out = d[["Label","Điểm_mua_hàng","Tổng_Gross","Tổng_Net","Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"]].rename(columns={"Label":"Kỳ"})
+        out = d[[
+            "Label","Điểm_mua_hàng",
+            "Tổng_Gross","Tổng_Net","Số_đơn_hàng",
+            "Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"
+        ]].rename(columns={"Label":"Kỳ"})
+
         out["Tổng_Gross"] = out["Tổng_Gross"].apply(fmt_int)
-        out["Tổng_Net"]   = out["Tổng_Net"].apply(fmt_int)
+        out["Tổng_Net"] = out["Tổng_Net"].apply(fmt_int)
+        out["Số_đơn_hàng"] = out["Số_đơn_hàng"].apply(fmt_int)   # ✅ format
         out["Prev_Tổng_Net"] = out["Prev_Tổng_Net"].apply(fmt_int)
         out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v,2))
         out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v,2,with_sign=True))
@@ -330,3 +346,4 @@ else:
     with c2:
         st.markdown("### 📉 Bottom 10")
         st.dataframe(show_store_table(bot10), use_container_width=True, hide_index=True)
+
