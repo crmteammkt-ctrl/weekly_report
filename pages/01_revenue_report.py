@@ -268,14 +268,27 @@ else:
     )
     reg["Tỷ_lệ_CK (%)"] = np.where(reg["Tổng_Gross"]!=0, (1 - reg["Tổng_Net"]/reg["Tổng_Gross"])*100, 0)
 
+    # ✅ Prev_Tổng_Net & Change% theo từng Region (kỳ trước)
+reg = reg.sort_values(["Region"] + gcols)  # quan trọng: đảm bảo đúng thứ tự thời gian
+reg["Prev_Tổng_Net"] = reg.groupby("Region")["Tổng_Net"].shift(1)
+reg["Change%"] = np.where(
+    reg["Prev_Tổng_Net"] > 0,
+    (reg["Tổng_Net"] - reg["Prev_Tổng_Net"]) / reg["Prev_Tổng_Net"] * 100,
+    np.nan
+)
+
+
     periods = summary["Label"].tolist()
     sel = st.selectbox("Chọn kỳ", periods, index=len(periods)-1, key=REV + "region_period")
 
     reg_view = reg[reg["Label"] == sel].sort_values("Tổng_Net", ascending=False).copy()
-    reg_show = reg_view[["Label","Region","Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng","Tỷ_lệ_CK (%)"]].rename(columns={"Label":"Kỳ"})
-    for c in ["Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng"]:
+    reg_show = reg_view[["Label","Region","Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng","Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"]].rename(columns={"Label":"Kỳ"})
+    for c in ["Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng","Prev_Tổng_Net"]:
         reg_show[c] = reg_show[c].apply(fmt_int)
+    if "Tỷ_lệ_CK (%)" in reg_show.columns:
     reg_show["Tỷ_lệ_CK (%)"] = reg_show["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v,2))
+    if "Change%" in reg_show.columns:
+    reg_show["Change%"] = reg_show["Change%"].apply(lambda v: fmt_pct(v,2,with_sign=True))
     st.dataframe(reg_show, use_container_width=True, hide_index=True)
 
 # =====================================================
