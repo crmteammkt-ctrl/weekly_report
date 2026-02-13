@@ -195,12 +195,20 @@ def add_time_key(df_in: pd.DataFrame, grain: str):
     gcols = ["Year", "Key", "Label"]
     return out, gcols
 
+def make_period_label(row, grain: str) -> str:
+    if grain == "Ngày":
+        return pd.to_datetime(row["Label"]).strftime("%Y-%m-%d")
+    if grain == "Tuần":
+        return f"Tuần {int(row['Key']):02d}/{int(row['Year'])}"
+    if grain == "Tháng":
+        return f"{int(row['Year'])}-{int(row['Key']):02d}"
+    return f"Q{int(row['Key'])} {int(row['Year'])}"
+
+df_tmp, gcols = add_time_key(df_f, time_grain)
 
 # =====================================================
 # SUMMARY
 # =====================================================
-df_tmp, gcols = add_time_key(df_f, time_grain)
-
 summary = (
     df_tmp.groupby(gcols, observed=True)
     .agg(
@@ -217,17 +225,10 @@ summary["Tỷ_lệ_CK (%)"] = np.where(summary["Tổng_Gross"] > 0, (1 - summary
 summary["Prev_Tổng_Net"] = summary["Tổng_Net"].shift(1)
 summary["Change%"] = np.where(summary["Prev_Tổng_Net"] > 0, (summary["Tổng_Net"] - summary["Prev_Tổng_Net"]) / summary["Prev_Tổng_Net"] * 100, np.nan)
 
-# Label hiển thị
 summary_show = summary.copy()
-if time_grain == "Ngày":
-    summary_show["Kỳ"] = pd.to_datetime(summary_show["Label"]).dt.strftime("%Y-%m-%d")
-elif time_grain == "Tuần":
-    summary_show["Kỳ"] = "Tuần " + summary_show["Key"].astype(int).astype(str).str.zfill(2) + "/" + summary_show["Year"].astype(int).astype(str)
-elif time_grain == "Tháng":
-    summary_show["Kỳ"] = summary_show["Year"].astype(int).astype(str) + "-" + summary_show["Key"].astype(int).astype(str).str.zfill(2)
-else:
-    summary_show["Kỳ"] = "Q" + summary_show["Key"].astype(int).astype(str) + " " + summary_show["Year"].astype(int).astype(str)
+summary_show["Kỳ"] = summary_show.apply(lambda r: make_period_label(r, time_grain), axis=1)
 
+# Format hiển thị summary (giữ format số như bạn muốn)
 for c in ["Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng","Prev_Tổng_Net"]:
     summary_show[c] = summary_show[c].apply(fmt_int)
 summary_show["Tỷ_lệ_CK (%)"] = summary_show["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v, 2))
@@ -241,7 +242,59 @@ st.dataframe(
 )
 
 fig = px.line(summary, x="Label", y=["Tổng_Gross","Tổng_Net"], markers=True, title=f"Doanh thu theo {time_grain}")
-st.plotly_chart(fig, use_container_width=True)  # plotly vẫn dùng ok
+st.plotly_chart(fig, use_container_width=True)  # plotly ok
+
+# =====================================================
+# REGION REPORT (BẠN THIẾU CÁI NÀY) + CHỌN KỲ
+# =====================================================
+st.subheader("🌍 Doanh thu theo Region")
+
+if "Region" not in df_tmp.columns:
+    st.info("Thiếu cột Region.")
+else:
+    reg = (
+        df_tmp.groupby(["Region"] + gcols, observed=True, dropna=False)
+        .agg(
+            Tổng_Gross=("Tổng_Gross","sum"),
+            Tổng_Net=("Tổng_Net","sum"),
+            Số_KH=("Số_điện_thoại","nunique"),
+            Số_đơn_hàng=("Số_CT","nunique"),
+        )
+        .reset_index()
+        .sort_values(["Region","Label"])
+    )
+    reg["Tỷ_lệ_CK (%)"] = np.where(reg["Tổng_Gross"]>0, (1 - reg["Tổng_Net"]/reg["Tổng_Gross"])*100, 0)
+
+    # ✅ Prev_Tổng_Net & Change% theo từng Region (kỳ trước)
+    reg["Prev_Tổng_Net"] = reg.groupby("Region")["Tổng_Net"].shift(1)
+    reg["Change%"] = np.where(
+        reg["Prev_Tổng_Net"] > 0,
+        (reg["Tổng_Net"] - reg["Prev_Tổng_Net"]) / reg["Prev_Tổng_Net"] * 100,
+        np.nan
+    )
+
+    # label kỳ để select
+    periods_df = summary[["Label"]].drop_duplicates().sort_values("Label").copy()
+    periods_df["Kỳ"] = periods_df.apply(lambda r: make_period_label(r, time_grain), axis=1)
+
+    periods = periods_df["Kỳ"].tolist()
+    sel_period = st.selectbox("Chọn kỳ", periods, index=len(periods)-1, key=REV + "region_period")
+
+    sel_label_ts = periods_df.loc[periods_df["Kỳ"] == sel_period, "Label"].iloc[0]
+
+    reg_view = reg[reg["Label"] == sel_label_ts].sort_values("Tổng_Net", ascending=False).copy()
+    reg_show = reg_view[[
+        "Region","Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng","Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"
+    ]].copy()
+
+    reg_show.insert(0, "Kỳ", sel_period)
+
+    for c in ["Tổng_Gross","Tổng_Net","Số_KH","Số_đơn_hàng","Prev_Tổng_Net"]:
+        reg_show[c] = reg_show[c].apply(fmt_int)
+    reg_show["Tỷ_lệ_CK (%)"] = reg_show["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v,2))
+    reg_show["Change%"] = reg_show["Change%"].apply(lambda v: fmt_pct(v,2,with_sign=True))
+
+    st.dataframe(reg_show, width="stretch", hide_index=True)
 
 # =====================================================
 # TOP/BOTTOM STORE (GIỮ Prev + Change% + THÊM SỐ_ĐƠN_HÀNG)
@@ -249,65 +302,61 @@ st.plotly_chart(fig, use_container_width=True)  # plotly vẫn dùng ok
 st.subheader("🏪 Top/Bottom 10 Điểm mua hàng")
 st.markdown("### 🔍 Chọn kỳ để xem Top/Bottom")
 
-# periods label list
 period_labels = summary_show["Kỳ"].tolist()
 sel = st.selectbox("Chọn kỳ", period_labels, index=len(period_labels)-1, key=REV + "store_period")
 
-# map back to selected Label timestamp
 sel_label_ts = summary.loc[summary_show["Kỳ"] == sel, "Label"].iloc[0]
 
-df_store = df_tmp.copy()
-# lọc theo kỳ
-df_store = df_store[df_store["Label"] == sel_label_ts].copy()
+df_store = df_tmp[df_tmp["Label"] == sel_label_ts].copy()
 
-# store group
-store_g = (
-    df_store.groupby("Điểm_mua_hàng", observed=True, dropna=False)
-    .agg(
-        Tổng_Gross=("Tổng_Gross","sum"),
-        Tổng_Net=("Tổng_Net","sum"),
-        Số_đơn_hàng=("Số_CT","nunique"),
+if "Điểm_mua_hàng" not in df_store.columns:
+    st.info("Thiếu cột Điểm_mua_hàng.")
+else:
+    store_g = (
+        df_store.groupby("Điểm_mua_hàng", observed=True, dropna=False)
+        .agg(
+            Tổng_Gross=("Tổng_Gross","sum"),
+            Tổng_Net=("Tổng_Net","sum"),
+            Số_đơn_hàng=("Số_CT","nunique"),
+        )
+        .reset_index()
     )
-    .reset_index()
-)
+    store_g["Tỷ_lệ_CK (%)"] = np.where(store_g["Tổng_Gross"]>0, (1 - store_g["Tổng_Net"]/store_g["Tổng_Gross"])*100, 0)
 
-store_g["Tỷ_lệ_CK (%)"] = np.where(store_g["Tổng_Gross"]>0, (1 - store_g["Tổng_Net"]/store_g["Tổng_Gross"])*100, 0)
+    # Prev & Change theo cửa hàng dựa trên tất cả kỳ
+    store_all = (
+        df_tmp.groupby(["Điểm_mua_hàng"] + gcols, observed=True, dropna=False)
+        .agg(Tổng_Net=("Tổng_Net","sum"))
+        .reset_index()
+        .sort_values(["Điểm_mua_hàng","Label"])
+    )
+    store_all["Prev_Tổng_Net"] = store_all.groupby("Điểm_mua_hàng")["Tổng_Net"].shift(1)
+    store_all["Change%"] = np.where(
+        store_all["Prev_Tổng_Net"]>0,
+        (store_all["Tổng_Net"]-store_all["Prev_Tổng_Net"])/store_all["Prev_Tổng_Net"]*100,
+        np.nan
+    )
 
-# ✅ Prev Net & Change% theo cửa hàng: tính dựa trên ALL kỳ trước đó
-store_all = (
-    df_tmp.groupby(["Điểm_mua_hàng"] + gcols, observed=True, dropna=False)
-    .agg(Tổng_Net=("Tổng_Net","sum"))
-    .reset_index()
-    .sort_values(["Điểm_mua_hàng","Label"])
-)
-store_all["Prev_Tổng_Net"] = store_all.groupby("Điểm_mua_hàng")["Tổng_Net"].shift(1)
-store_all["Change%"] = np.where(
-    store_all["Prev_Tổng_Net"]>0,
-    (store_all["Tổng_Net"]-store_all["Prev_Tổng_Net"])/store_all["Prev_Tổng_Net"]*100,
-    np.nan
-)
+    store_key = store_all[store_all["Label"] == sel_label_ts][["Điểm_mua_hàng","Prev_Tổng_Net","Change%"]]
+    store_g = store_g.merge(store_key, on="Điểm_mua_hàng", how="left")
 
-# join prev/change vào kỳ đang xem
-store_key = store_all[store_all["Label"] == sel_label_ts][["Điểm_mua_hàng","Prev_Tổng_Net","Change%"]]
-store_g = store_g.merge(store_key, on="Điểm_mua_hàng", how="left")
+    top10 = store_g.sort_values("Tổng_Net", ascending=False).head(10).copy()
+    bot10 = store_g.sort_values("Tổng_Net", ascending=True).head(10).copy()
 
-top10 = store_g.sort_values("Tổng_Net", ascending=False).head(10).copy()
-bot10 = store_g.sort_values("Tổng_Net", ascending=True).head(10).copy()
+    def fmt_store_table(d):
+        out = d.copy()
+        out.insert(0, "Kỳ", sel)
+        for c in ["Tổng_Gross","Tổng_Net","Số_đơn_hàng","Prev_Tổng_Net"]:
+            out[c] = out[c].apply(fmt_int)
+        out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v,2))
+        out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v,2,with_sign=True))
+        return out[["Kỳ","Điểm_mua_hàng","Tổng_Gross","Tổng_Net","Số_đơn_hàng","Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"]]
 
-def fmt_store_table(d):
-    out = d.copy()
-    out.insert(0, "Kỳ", sel)
-    for c in ["Tổng_Gross","Tổng_Net","Số_đơn_hàng","Prev_Tổng_Net"]:
-        out[c] = out[c].apply(fmt_int)
-    out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v,2))
-    out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v,2,with_sign=True))
-    return out[["Kỳ","Điểm_mua_hàng","Tổng_Gross","Tổng_Net","Số_đơn_hàng","Tỷ_lệ_CK (%)","Prev_Tổng_Net","Change%"]]
+    colA, colB = st.columns(2)
+    with colA:
+        st.markdown("### 🏆 Top 10 Điểm mua hàng")
+        st.dataframe(fmt_store_table(top10), width="stretch", hide_index=True)
 
-colA, colB = st.columns(2)
-with colA:
-    st.markdown("### 🏆 Top 10 Điểm mua hàng")
-    st.dataframe(fmt_store_table(top10), width="stretch", hide_index=True)
-
-with colB:
-    st.markdown("### 📉 Bottom 10 Điểm mua hàng")
-    st.dataframe(fmt_store_table(bot10), width="stretch", hide_index=True)
+    with colB:
+        st.markdown("### 📉 Bottom 10 Điểm mua hàng")
+        st.dataframe(fmt_store_table(bot10), width="stretch", hide_index=True)
