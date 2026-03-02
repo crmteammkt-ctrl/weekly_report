@@ -392,7 +392,7 @@ else:
     st.dataframe(reg_show, use_container_width=True, hide_index=True)
 
 # =====================================================
-# TOP / BOTTOM 10 STORE (chọn kỳ)
+# TOP / BOTTOM 10 STORE (chọn kỳ) + lọc Region nhỏ
 # =====================================================
 st.subheader("🏪 Top / Bottom 10")
 
@@ -400,22 +400,81 @@ if store.empty:
     st.info("Thiếu cột Điểm_mua_hàng hoặc không có dữ liệu.")
 else:
     periods2 = summary["Label"].tolist()
-    sel_period2 = st.selectbox("Chọn kỳ (Top/Bottom)", periods2, index=len(periods2) - 1, key=REV + "store_period")
+    sel_period2 = st.selectbox(
+        "Chọn kỳ (Top/Bottom)",
+        periods2,
+        index=len(periods2) - 1,
+        key=REV + "store_period",
+    )
 
+    # data theo kỳ
     s_view = store[store["Label"] == sel_period2].copy()
+
+    # ✅ lọc Region nhỏ (không dùng sidebar)
+    # Chỉ bật nếu df có Region và store name tồn tại trong tmp
+    if "Region" in tmp.columns and "Điểm_mua_hàng" in tmp.columns:
+        # map store -> region (đa số store thuộc 1 region)
+        store_region = (
+            tmp.loc[tmp["Label"] == sel_period2, ["Điểm_mua_hàng", "Region"]]
+            .dropna()
+            .drop_duplicates()
+        )
+
+        # nếu 1 store có nhiều region (hiếm), lấy region xuất hiện nhiều nhất
+        if not store_region.empty:
+            mode_map = (
+                store_region.groupby("Điểm_mua_hàng")["Region"]
+                .agg(lambda x: x.value_counts().index[0])
+                .reset_index()
+            )
+            s_view = s_view.merge(mode_map, on="Điểm_mua_hàng", how="left")
+        else:
+            s_view["Region"] = np.nan
+
+        region_opts = sorted([r for r in s_view["Region"].dropna().astype(str).unique().tolist()])
+        region_ui = ["All"] + region_opts
+
+        # init để không reset khi chuyển trang
+        if REV + "tb_region" not in st.session_state:
+            st.session_state[REV + "tb_region"] = "All"
+
+        sel_r = st.selectbox(
+            "Lọc Region (Top/Bottom)",
+            region_ui,
+            index=region_ui.index(st.session_state[REV + "tb_region"])
+            if st.session_state[REV + "tb_region"] in region_ui else 0,
+            key=REV + "tb_region",
+        )
+
+        if sel_r != "All":
+            s_view = s_view[s_view["Region"].astype(str) == sel_r].copy()
+    else:
+        sel_r = "All"  # để debug nếu cần
+
+    if s_view.empty:
+        st.info("Không có dữ liệu Top/Bottom theo lựa chọn hiện tại.")
+        st.stop()
 
     top10 = s_view.sort_values("Tổng_Net", ascending=False).head(10).copy()
     bottom10 = s_view.sort_values("Tổng_Net", ascending=True).head(10).copy()
 
     def _fmt_store(df_in: pd.DataFrame) -> pd.DataFrame:
-        out = df_in[
-            ["Label", "Điểm_mua_hàng", "Tổng_Gross", "Tổng_Net", "Số_đơn_hàng", "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "Change%"]
-        ].rename(columns={"Label": "Kỳ"}).copy()
+        cols = ["Label", "Điểm_mua_hàng", "Tổng_Gross", "Tổng_Net", "Số_đơn_hàng",
+                "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "Change%"]
+        if "Region" in df_in.columns:
+            cols.insert(2, "Region")  # hiển thị Region ngay sau store
+
+        out = df_in[cols].rename(columns={"Label": "Kỳ"}).copy()
 
         for c in ["Tổng_Gross", "Tổng_Net", "Số_đơn_hàng", "Prev_Tổng_Net"]:
-            out[c] = out[c].apply(fmt_int)
-        out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v, 2))
-        out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
+            if c in out.columns:
+                out[c] = out[c].apply(fmt_int)
+
+        if "Tỷ_lệ_CK (%)" in out.columns:
+            out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v, 2))
+        if "Change%" in out.columns:
+            out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
+
         return out
 
     colA, colB = st.columns(2)
