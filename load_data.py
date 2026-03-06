@@ -1,4 +1,3 @@
-# load_data.py
 import os
 import hashlib
 from typing import Iterable, Optional
@@ -173,8 +172,15 @@ def first_purchase(fp_key: str, df: pd.DataFrame) -> pd.DataFrame:
     if "Số_điện_thoại" not in df.columns or "Ngày" not in df.columns:
         return pd.DataFrame(columns=["Số_điện_thoại", "First_Date"])
 
+    d = df.copy()
+    d["Ngày"] = pd.to_datetime(d["Ngày"], errors="coerce")
+    d["Số_điện_thoại"] = d["Số_điện_thoại"].astype(str).str.strip()
+
+    d = d.dropna(subset=["Ngày", "Số_điện_thoại"])
+    d = d[d["Số_điện_thoại"] != ""]
+
     out = (
-        df.groupby("Số_điện_thoại", as_index=False)["Ngày"]
+        d.groupby("Số_điện_thoại", as_index=False)["Ngày"]
         .min()
         .rename(columns={"Ngày": "First_Date"})
     )

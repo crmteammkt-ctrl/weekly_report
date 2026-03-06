@@ -5,7 +5,7 @@ import numpy as np
 import streamlit as st
 from io import BytesIO
 
-from load_data import get_active_data, first_purchase
+from load_data import get_active_data, get_first_purchase
 
 # =====================================================
 # SAFE MULTISELECT WITH "ALL"
@@ -25,7 +25,6 @@ def safe_multiselect_all(
     - giữ selection cũ nếu còn tồn tại
     - không modify session_state sau khi widget instantiate
     """
-    # Build clean options
     opts = pd.Series(list(options)).dropna().astype(str)
     if normalize:
         opts = opts.str.strip()
@@ -33,28 +32,24 @@ def safe_multiselect_all(
 
     ui_opts = [all_label] + opts
 
-    # Init session BEFORE widget
     if key not in st.session_state:
         st.session_state[key] = [all_label] if default_all else (opts[:1] if opts else [all_label])
 
-    # Sanitize current selection BEFORE widget
     cur = st.session_state.get(key, [])
     cur = [str(x).strip() for x in cur if str(x).strip() in ui_opts]
     if not cur:
         cur = [all_label] if default_all else (opts[:1] if opts else [all_label])
-        st.session_state[key] = cur  # still BEFORE widget
+        st.session_state[key] = cur
 
-    # Create widget (do NOT assign st.session_state[key] after this)
     selected = st.multiselect(label, options=ui_opts, key=key)
 
-    # Return normalized selection for filtering
     if (not selected) or (all_label in selected):
         return opts
     return [x for x in selected if x in opts]
 
 
 # =====================================================
-# FORMAT HELPERS (an toàn - không phụ thuộc Streamlit format)
+# FORMAT HELPERS
 # =====================================================
 def fmt_int(x):
     if pd.isna(x):
@@ -75,7 +70,6 @@ def fmt_num(x, decimals=2):
 
 
 def fmt_pct(x, decimals=2):
-    # x đang là 20.8 => "20.80%"
     if pd.isna(x):
         return ""
     try:
@@ -152,7 +146,6 @@ with st.sidebar:
         default_all=True,
     )
 
-# Cascade: Region by Brand
 df_b = df[df["Brand"].isin(brand_filter)] if (brand_filter and "Brand" in df.columns) else df.iloc[0:0]
 
 with st.sidebar:
@@ -164,7 +157,6 @@ with st.sidebar:
         default_all=True,
     )
 
-# Cascade: Store by Brand+Region
 df_br = df_b[df_b["Region"].isin(region_filter)] if (region_filter and "Region" in df_b.columns) else df_b.iloc[0:0]
 
 with st.sidebar:
@@ -339,7 +331,6 @@ df_export = df_export.sort_values(sort_col, ascending=(sort_order == "Tăng dầ
 total_kh_filtered = df_export["Số_điện_thoại"].nunique()
 st.info(f"👥 Tổng số KH theo bộ lọc hiện tại: **{total_kh_filtered:,}** khách hàng")
 
-# Row tổng
 total_row = {}
 for col in df_export.columns:
     if col in ["Gross", "Net", "Orders"]:
@@ -357,7 +348,6 @@ for col in df_export.columns:
 
 df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
 
-# ===== format hiển thị CRM =====
 df_export_display = df_export_with_total[display_cols].copy()
 
 for c in ["Gross", "Net", "Orders"]:
@@ -412,7 +402,12 @@ def pareto_customer_by_store(df: pd.DataFrame, percent=20, top=True) -> pd.DataF
         if g.empty:
             continue
 
-        g["CK_%"] = ((g["Gross"] - g["Net"]) / g["Gross"] * 100).round(2)
+        g["CK_%"] = np.where(
+            g["Gross"] > 0,
+            ((g["Gross"] - g["Net"]) / g["Gross"] * 100).round(2),
+            0,
+        )
+
         total_net = g["Net"].sum()
         g["Contribution_%"] = (g["Net"] / total_net * 100).round(2) if total_net != 0 else 0
         g["Cum_%"] = g["Contribution_%"].cumsum().round(2)
@@ -454,9 +449,13 @@ else:
 # =========================
 # KH MỚI VS KH QUAY LẠI
 # =========================
-df_fp = first_purchase(df)  # dùng toàn bộ active_df để đúng First_Date
+df_fp = get_first_purchase(df)
 df_kh = df_f.merge(df_fp, on="Số_điện_thoại", how="left")
-df_kh["KH_type"] = np.where(df_kh["First_Date"] >= pd.to_datetime(start_date), "KH mới", "KH quay lại")
+df_kh["KH_type"] = np.where(
+    df_kh["First_Date"].dt.date >= pd.to_datetime(start_date).date(),
+    "KH mới",
+    "KH quay lại",
+)
 
 st.subheader("👥 KH mới vs KH quay lại")
 st.dataframe(
@@ -498,7 +497,6 @@ for cohort, size in cohort_size.items():
 
 retention = pd.DataFrame(rows)
 
-# GRAND TOTAL
 if not retention.empty:
     total_kh = retention["Tổng KH"].sum()
     grand = {"First_Month": "Grand Total", "Tổng KH": int(total_kh)}
@@ -527,8 +525,12 @@ else:
 with st.sidebar:
     if st.button("🔄 Reset filters"):
         for k in [
-            "loaiCT_filter", "brand_filter", "region_filter", "store_filter",
-            "kiem_tra_ten_filter", "check_sdt_filter",
+            "loaiCT_filter",
+            "brand_filter",
+            "region_filter",
+            "store_filter",
+            "kiem_tra_ten_filter",
+            "check_sdt_filter",
         ]:
             st.session_state.pop(k, None)
         st.rerun()
