@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from load_data import get_active_data
+from load_data import get_revenue_data
 
 # =====================================================
 # FORMAT HELPERS
@@ -115,8 +115,9 @@ st.title("📈 Báo cáo Doanh thu")
 # =====================================================
 # LOAD
 # =====================================================
-df = get_active_data()
+df = get_revenue_data()
 st.sidebar.caption("🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default")))
+st.sidebar.caption(f"RAM df ~ {df.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
 
 df = ensure_datetime(df)
 df = fix_numeric(df)
@@ -233,7 +234,7 @@ else:
 
 tmp["Label"] = label_from_time(tmp["Time"], time_grain)
 
-# chỉ giữ cột cần cho revenue page
+# chỉ giữ cột cần cho build table
 needed_cols = [
     "Time",
     "Label",
@@ -414,7 +415,7 @@ fig = px.line(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-show_aov_chart = st.checkbox("Hiện chart AOV", value=True)
+show_aov_chart = st.checkbox("Hiện chart AOV", value=False)
 if show_aov_chart:
     fig2 = px.line(
         summary,

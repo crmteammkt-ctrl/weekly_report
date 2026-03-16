@@ -5,7 +5,7 @@ import numpy as np
 import streamlit as st
 from io import BytesIO
 
-from load_data import get_active_data, get_first_purchase
+from load_data import get_crm_data, get_first_purchase
 
 # =====================================================
 # SAFE MULTISELECT WITH "ALL"
@@ -18,13 +18,6 @@ def safe_multiselect_all(
     default_all: bool = True,
     normalize: bool = True,
 ):
-    """
-    Multiselect có 'All' an toàn:
-    - All luôn hợp lệ
-    - options đổi không bao giờ crash
-    - giữ selection cũ nếu còn tồn tại
-    - không modify session_state sau khi widget instantiate
-    """
     opts = pd.Series(list(options)).dropna().astype(str)
     if normalize:
         opts = opts.str.strip()
@@ -47,7 +40,6 @@ def safe_multiselect_all(
         return opts
     return [x for x in selected if x in opts]
 
-
 # =====================================================
 # FORMAT HELPERS
 # =====================================================
@@ -59,7 +51,6 @@ def fmt_int(x):
     except Exception:
         return ""
 
-
 def fmt_num(x, decimals=2):
     if pd.isna(x):
         return ""
@@ -67,7 +58,6 @@ def fmt_num(x, decimals=2):
         return f"{float(x):,.{decimals}f}"
     except Exception:
         return ""
-
 
 def fmt_pct(x, decimals=2):
     if pd.isna(x):
@@ -77,13 +67,11 @@ def fmt_pct(x, decimals=2):
     except Exception:
         return ""
 
-
 def to_excel(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Data")
     return output.getvalue()
-
 
 def ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
     if "Ngày" in df.columns:
@@ -91,19 +79,16 @@ def ensure_datetime(df: pd.DataFrame) -> pd.DataFrame:
         df = df.dropna(subset=["Ngày"])
     return df
 
-
 def fix_numeric(df: pd.DataFrame) -> pd.DataFrame:
     for c in ["Tổng_Gross", "Tổng_Net"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
-
 def show_df(df_show: pd.DataFrame, title: str | None = None):
     if title:
         st.subheader(title)
     st.dataframe(df_show, use_container_width=True, hide_index=True)
-
 
 # =====================================================
 # PAGE
@@ -113,13 +98,20 @@ st.title("📤 CRM & Cohort Retention")
 # =====================================================
 # LOAD
 # =====================================================
-df = get_active_data()
+df = get_crm_data()
+st.sidebar.caption("🔎 Đang dùng nguồn: **{}**".format(st.session_state.get("active_source", "default")))
+st.sidebar.caption(f"RAM df ~ {df.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
+
 df = ensure_datetime(df)
 df = fix_numeric(df)
 
 if df.empty:
     st.warning("⚠ Không có dữ liệu để phân tích. Kiểm tra lại nguồn dữ liệu.")
     st.stop()
+
+# đảm bảo các cột CRM có tồn tại để tránh crash
+if "tên_KH" not in df.columns:
+    df["tên_KH"] = None
 
 # =====================================================
 # SIDEBAR FILTER (Brand → Region → Cửa hàng) + All
@@ -168,7 +160,6 @@ with st.sidebar:
         default_all=True,
     )
 
-
 def apply_filters(df: pd.DataFrame, start_date, end_date, loaiCT, brand, region, store) -> pd.DataFrame:
     mask = (df["Ngày"] >= pd.to_datetime(start_date)) & (df["Ngày"] <= pd.to_datetime(end_date))
 
@@ -182,7 +173,6 @@ def apply_filters(df: pd.DataFrame, start_date, end_date, loaiCT, brand, region,
         mask &= df["Điểm_mua_hàng"].isin(store if store else [])
 
     return df.loc[mask].copy()
-
 
 df_f = apply_filters(df, start_date, end_date, loaiCT_filter, brand_filter, region_filter, store_filter)
 
@@ -207,13 +197,23 @@ GROUP_BY_CUSTOMER = st.sidebar.checkbox("Gộp tất cả giao dịch của 1 KH
 min_net = st.sidebar.number_input("Net tối thiểu (lọc)", 0, value=0)
 
 group_cols = ["Số_điện_thoại"]
-if not GROUP_BY_CUSTOMER:
+if not GROUP_BY_CUSTOMER and "Điểm_mua_hàng" in df_f.columns:
     group_cols.append("Điểm_mua_hàng")
 
-
 def build_crm(df_f: pd.DataFrame, group_cols):
+    # chọn cột an toàn
+    required_cols = [c for c in group_cols if c in df_f.columns]
+    work = df_f.copy()
+
+    if "tên_KH" not in work.columns:
+        work["tên_KH"] = None
+    if "Kiểm_tra_tên" not in work.columns:
+        work["Kiểm_tra_tên"] = None
+    if "Trạng_thái_số_điện_thoại" not in work.columns:
+        work["Trạng_thái_số_điện_thoại"] = None
+
     d = (
-        df_f.groupby(group_cols)
+        work.groupby(required_cols)
         .agg(
             Name=("tên_KH", "first"),
             Name_Check=("Kiểm_tra_tên", "first"),
@@ -227,7 +227,6 @@ def build_crm(df_f: pd.DataFrame, group_cols):
         .reset_index()
     )
     return d
-
 
 df_export = build_crm(df_f, group_cols)
 
@@ -267,7 +266,7 @@ display_cols = [
     "Bao_lâu_không_mua",
     "Last_Order",
 ]
-if not GROUP_BY_CUSTOMER:
+if not GROUP_BY_CUSTOMER and "Điểm_mua_hàng" in df_export.columns:
     display_cols.insert(1, "Điểm_mua_hàng")
 
 # =========================
@@ -314,10 +313,10 @@ if show_customer:
 if selected_tags:
     df_export = df_export[df_export["KH_tag"].isin(selected_tags)]
 
-if check_sdt_filter:
+if check_sdt_filter and "Check_SDT" in df_export.columns:
     df_export = df_export[df_export["Check_SDT"].isin(check_sdt_filter)]
 
-if kiem_tra_ten_filter:
+if kiem_tra_ten_filter and "Name_Check" in df_export.columns:
     df_export = df_export[df_export["Name_Check"].isin(kiem_tra_ten_filter)]
 
 sort_col = st.selectbox(
@@ -328,7 +327,7 @@ sort_col = st.selectbox(
 sort_order = st.radio("Thứ tự", ["Giảm dần", "Tăng dần"], horizontal=True)
 df_export = df_export.sort_values(sort_col, ascending=(sort_order == "Tăng dần"))
 
-total_kh_filtered = df_export["Số_điện_thoại"].nunique()
+total_kh_filtered = df_export["Số_điện_thoại"].nunique() if "Số_điện_thoại" in df_export.columns else 0
 st.info(f"👥 Tổng số KH theo bộ lọc hiện tại: **{total_kh_filtered:,}** khách hàng")
 
 total_row = {}
@@ -348,6 +347,7 @@ for col in df_export.columns:
 
 df_export_with_total = pd.concat([df_export, pd.DataFrame([total_row])], ignore_index=True)
 
+display_cols = [c for c in display_cols if c in df_export_with_total.columns]
 df_export_display = df_export_with_total[display_cols].copy()
 
 for c in ["Gross", "Net", "Orders"]:
@@ -380,18 +380,22 @@ st.download_button(
 # PARETO KH THEO CỬA HÀNG
 # =========================
 st.sidebar.header("🏆 Pareto KH theo Cửa hàng")
+
 pareto_percent = st.sidebar.slider("Chọn % KH Pareto", 5, 50, 20)
 pareto_type = st.sidebar.radio("Loại Pareto", ["Top", "Bottom"])
 
 store_filter_pareto = st.sidebar.multiselect(
     "Chọn Cửa hàng (Pareto)",
-    sorted(df_f["Điểm_mua_hàng"].dropna().unique()),
-    default=sorted(df_f["Điểm_mua_hàng"].dropna().unique()),
+    sorted(df_f["Điểm_mua_hàng"].dropna().astype(str).unique()) if "Điểm_mua_hàng" in df_f.columns else [],
+    default=sorted(df_f["Điểm_mua_hàng"].dropna().astype(str).unique()) if "Điểm_mua_hàng" in df_f.columns else [],
 )
-
 
 def pareto_customer_by_store(df: pd.DataFrame, percent=20, top=True) -> pd.DataFrame:
     rows = []
+
+    if "Điểm_mua_hàng" not in df.columns:
+        return pd.DataFrame()
+
     for store, d in df.groupby("Điểm_mua_hàng"):
         g = (
             d.groupby("Số_điện_thoại")
@@ -423,10 +427,9 @@ def pareto_customer_by_store(df: pd.DataFrame, percent=20, top=True) -> pd.DataF
         return pd.concat(rows, ignore_index=True)
     return pd.DataFrame()
 
-
 df_pareto_base = df_f.copy()
-if store_filter_pareto:
-    df_pareto_base = df_pareto_base[df_pareto_base["Điểm_mua_hàng"].isin(store_filter_pareto)]
+if store_filter_pareto and "Điểm_mua_hàng" in df_pareto_base.columns:
+    df_pareto_base = df_pareto_base[df_pareto_base["Điểm_mua_hàng"].astype(str).isin(store_filter_pareto)]
 
 df_pareto = pareto_customer_by_store(df_pareto_base, percent=pareto_percent, top=(pareto_type == "Top"))
 
@@ -437,10 +440,14 @@ if not df_pareto.empty:
     ].copy()
 
     for c in ["Gross", "Net", "Orders"]:
-        df_pareto_show[c] = df_pareto_show[c].apply(fmt_int)
-    df_pareto_show["CK_%"] = df_pareto_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
-    df_pareto_show["Contribution_%"] = df_pareto_show["Contribution_%"].apply(lambda v: fmt_pct(v, 2))
-    df_pareto_show["Cum_%"] = df_pareto_show["Cum_%"].apply(lambda v: fmt_pct(v, 2))
+        if c in df_pareto_show.columns:
+            df_pareto_show[c] = df_pareto_show[c].apply(fmt_int)
+    if "CK_%" in df_pareto_show.columns:
+        df_pareto_show["CK_%"] = df_pareto_show["CK_%"].apply(lambda v: fmt_pct(v, 2))
+    if "Contribution_%" in df_pareto_show.columns:
+        df_pareto_show["Contribution_%"] = df_pareto_show["Contribution_%"].apply(lambda v: fmt_pct(v, 2))
+    if "Cum_%" in df_pareto_show.columns:
+        df_pareto_show["Cum_%"] = df_pareto_show["Cum_%"].apply(lambda v: fmt_pct(v, 2))
 
     show_df(df_pareto_show, title=None)
 else:
@@ -513,7 +520,8 @@ if retention.empty:
     st.info("Không có dữ liệu cohort.")
 else:
     retention_show = retention.copy()
-    retention_show["Tổng KH"] = retention_show["Tổng KH"].apply(fmt_int)
+    if "Tổng KH" in retention_show.columns:
+        retention_show["Tổng KH"] = retention_show["Tổng KH"].apply(fmt_int)
     for c in retention_show.columns:
         if c.startswith("Sau"):
             retention_show[c] = retention_show[c].apply(lambda v: fmt_pct(v, 2))
