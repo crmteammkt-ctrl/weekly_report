@@ -377,9 +377,30 @@ def build_tables(tmp_df: pd.DataFrame, _sig: str):
         )
         store = store.sort_values(["Điểm_mua_hàng", "Time"])
         store["Prev_Tổng_Net"] = store.groupby("Điểm_mua_hàng")["Tổng_Net"].shift(1)
-        store["Change%"] = np.where(
+        store["Prev_Tổng_Gross"] = store.groupby("Điểm_mua_hàng")["Tổng_Gross"].shift(1)
+        store["Prev_Số_đơn_hàng"] = store.groupby("Điểm_mua_hàng")["Số_đơn_hàng"].shift(1)
+
+        store["Change Net%"] = np.where(
             store["Prev_Tổng_Net"] > 0,
-            (store["Tổng_Net"] - store["Prev_Tổng_Net"]) / store["Prev_Tổng_Net"] * 100,
+           (store["Tổng_Net"] - store["Prev_Tổng_Net"]) / store["Prev_Tổng_Net"] * 100,
+           np.nan,
+        )
+
+        store["Change Gross%"] = np.where(
+            store["Prev_Tổng_Gross"] > 0,
+            (store["Tổng_Gross"] - store["Prev_Tổng_Gross"]) / store["Prev_Tổng_Gross"] * 100,
+            np.nan,
+        )
+
+        store["Change ĐH%"] = np.where(
+            store["Prev_Số_đơn_hàng"] > 0,
+            (store["Số_đơn_hàng"] - store["Prev_Số_đơn_hàng"]) / store["Prev_Số_đơn_hàng"] * 100,
+            np.nan,
+        )
+
+        store["AOV"] = np.where(
+            store["Số_đơn_hàng"] > 0,
+            store["Tổng_Net"] / store["Số_đơn_hàng"],
             np.nan,
         )
     else:
@@ -541,23 +562,36 @@ else:
     bottom10 = s_view.sort_values("Tổng_Net", ascending=True).head(10).copy()
 
     def _fmt_store(df_in: pd.DataFrame) -> pd.DataFrame:
-        cols = ["Label", "Điểm_mua_hàng", "Tổng_Gross", "Tổng_Net", "Số_đơn_hàng",
-                "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "Change%"]
+        cols = [
+            "Label",
+            "Điểm_mua_hàng",
+            "Tổng_Gross",
+            "Tổng_Net",
+            "Số_đơn_hàng",
+            "AOV",
+            "Tỷ_lệ_CK (%)",
+            "Change Gross%",
+            "Change Net%",
+            "Change ĐH%",
+        ]
+
         if "Region" in df_in.columns:
             cols.insert(2, "Region")
 
         out = df_in[cols].rename(columns={"Label": "Kỳ"}).copy()
 
-        for c in ["Tổng_Gross", "Tổng_Net", "Số_đơn_hàng", "Prev_Tổng_Net"]:
+        for c in ["Tổng_Gross", "Tổng_Net", "Số_đơn_hàng", "AOV"]:
             if c in out.columns:
-                out[c] = out[c].apply(fmt_int)
+               out[c] = out[c].apply(fmt_int)
 
         if "Tỷ_lệ_CK (%)" in out.columns:
             out["Tỷ_lệ_CK (%)"] = out["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v, 2))
-        if "Change%" in out.columns:
-            out["Change%"] = out["Change%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
 
-        return out
+        for c in ["Change Gross%", "Change Net%", "Change ĐH%"]:
+            if c in out.columns:
+               out[c] = out[c].apply(lambda v: fmt_pct(v, 2, with_sign=True))
+
+    return out
 
     colA, colB = st.columns(2)
     with colA:
