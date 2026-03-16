@@ -299,12 +299,39 @@ def build_tables(tmp_df: pd.DataFrame, _sig: str):
             )
             .reset_index()
         )
-        reg["Tỷ_lệ_CK (%)"] = np.where(reg["Tổng_Gross"] != 0, (1 - reg["Tổng_Net"] / reg["Tổng_Gross"]) * 100, 0)
+        reg["Tỷ_lệ_CK (%)"] = np.where(
+            reg["Tổng_Gross"] != 0,
+            (1 - reg["Tổng_Net"] / reg["Tổng_Gross"]) * 100,
+            0
+        )
+
         reg = reg.sort_values(["Region", "Time"])
+
         reg["Prev_Tổng_Net"] = reg.groupby("Region")["Tổng_Net"].shift(1)
-        reg["Change%"] = np.where(
+        reg["Prev_Tổng_Gross"] = reg.groupby("Region")["Tổng_Gross"].shift(1)
+        reg["Prev_Số_đơn_hàng"] = reg.groupby("Region")["Số_đơn_hàng"].shift(1)
+
+        reg["Change Net%"] = np.where(
             reg["Prev_Tổng_Net"] > 0,
             (reg["Tổng_Net"] - reg["Prev_Tổng_Net"]) / reg["Prev_Tổng_Net"] * 100,
+            np.nan,
+        )
+
+        reg["Change Gross%"] = np.where(
+            reg["Prev_Tổng_Gross"] > 0,
+            (reg["Tổng_Gross"] - reg["Prev_Tổng_Gross"]) / reg["Prev_Tổng_Gross"] * 100,
+            np.nan,
+        )
+
+        reg["Change ĐH%"] = np.where(
+            reg["Prev_Số_đơn_hàng"] > 0,
+            (reg["Số_đơn_hàng"] - reg["Prev_Số_đơn_hàng"]) / reg["Prev_Số_đơn_hàng"] * 100,
+            np.nan,
+        )
+
+        reg["AOV"] = np.where(
+            reg["Số_đơn_hàng"] > 0,
+            reg["Tổng_Net"] / reg["Số_đơn_hàng"],
             np.nan,
         )
     else:
@@ -322,7 +349,11 @@ def build_tables(tmp_df: pd.DataFrame, _sig: str):
             )
             .reset_index()
         )
-        store["Tỷ_lệ_CK (%)"] = np.where(store["Tổng_Gross"] != 0, (1 - store["Tổng_Net"] / store["Tổng_Gross"]) * 100, 0)
+        store["Tỷ_lệ_CK (%)"] = np.where(
+            store["Tổng_Gross"] != 0,
+            (1 - store["Tổng_Net"] / store["Tổng_Gross"]) * 100,
+            0
+        )
         store = store.sort_values(["Điểm_mua_hàng", "Time"])
         store["Prev_Tổng_Net"] = store.groupby("Điểm_mua_hàng")["Tổng_Net"].shift(1)
         store["Change%"] = np.where(
@@ -343,7 +374,6 @@ summary, reg, store = build_tables(tmp, filter_signature)
 st.subheader("📊 Tổng hợp doanh thu")
 
 summary_show = summary.copy()
-# format
 for c in ["Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Prev_Tổng_Net"]:
     if c in summary_show.columns:
         summary_show[c] = summary_show[c].apply(fmt_int)
@@ -357,7 +387,6 @@ show_df(
     title=None
 )
 
-# plotly chart (dùng số gốc)
 fig = px.line(
     summary,
     x="Time",
@@ -381,13 +410,27 @@ else:
     reg_view = reg[reg["Label"] == sel_period].sort_values("Tổng_Net", ascending=False).copy()
 
     reg_show = reg_view[
-        ["Label", "Region", "Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "Change%"]
+        [
+            "Label",
+            "Region",
+            "Tổng_Gross",
+            "Tổng_Net",
+            "Số_đơn_hàng",
+            "AOV",
+            "Tỷ_lệ_CK (%)",
+            "Change Gross%",
+            "Change Net%",
+            "Change ĐH%",
+        ]
     ].rename(columns={"Label": "Kỳ"})
 
-    for c in ["Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Prev_Tổng_Net"]:
+    for c in ["Tổng_Gross", "Tổng_Net", "Số_đơn_hàng", "AOV"]:
         reg_show[c] = reg_show[c].apply(fmt_int)
+
     reg_show["Tỷ_lệ_CK (%)"] = reg_show["Tỷ_lệ_CK (%)"].apply(lambda v: fmt_pct(v, 2))
-    reg_show["Change%"] = reg_show["Change%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
+    reg_show["Change Gross%"] = reg_show["Change Gross%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
+    reg_show["Change Net%"] = reg_show["Change Net%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
+    reg_show["Change ĐH%"] = reg_show["Change ĐH%"].apply(lambda v: fmt_pct(v, 2, with_sign=True))
 
     st.dataframe(reg_show, use_container_width=True, hide_index=True)
 
@@ -407,20 +450,15 @@ else:
         key=REV + "store_period",
     )
 
-    # data theo kỳ
     s_view = store[store["Label"] == sel_period2].copy()
 
-    # ✅ lọc Region nhỏ (không dùng sidebar)
-    # Chỉ bật nếu df có Region và store name tồn tại trong tmp
     if "Region" in tmp.columns and "Điểm_mua_hàng" in tmp.columns:
-        # map store -> region (đa số store thuộc 1 region)
         store_region = (
             tmp.loc[tmp["Label"] == sel_period2, ["Điểm_mua_hàng", "Region"]]
             .dropna()
             .drop_duplicates()
         )
 
-        # nếu 1 store có nhiều region (hiếm), lấy region xuất hiện nhiều nhất
         if not store_region.empty:
             mode_map = (
                 store_region.groupby("Điểm_mua_hàng")["Region"]
@@ -434,7 +472,6 @@ else:
         region_opts = sorted([r for r in s_view["Region"].dropna().astype(str).unique().tolist()])
         region_ui = ["All"] + region_opts
 
-        # init để không reset khi chuyển trang
         if REV + "tb_region" not in st.session_state:
             st.session_state[REV + "tb_region"] = "All"
 
@@ -449,7 +486,7 @@ else:
         if sel_r != "All":
             s_view = s_view[s_view["Region"].astype(str) == sel_r].copy()
     else:
-        sel_r = "All"  # để debug nếu cần
+        sel_r = "All"
 
     if s_view.empty:
         st.info("Không có dữ liệu Top/Bottom theo lựa chọn hiện tại.")
@@ -462,7 +499,7 @@ else:
         cols = ["Label", "Điểm_mua_hàng", "Tổng_Gross", "Tổng_Net", "Số_đơn_hàng",
                 "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "Change%"]
         if "Region" in df_in.columns:
-            cols.insert(2, "Region")  # hiển thị Region ngay sau store
+            cols.insert(2, "Region")
 
         out = df_in[cols].rename(columns={"Label": "Kỳ"}).copy()
 
