@@ -280,9 +280,30 @@ def build_tables(tmp_df: pd.DataFrame, _sig: str):
 
     # Prev + % compare (theo thời gian)
     summary["Prev_Tổng_Net"] = summary["Tổng_Net"].shift(1)
-    summary["%_So_sánh_Tổng_Net"] = np.where(
+    summary["Prev_Tổng_Gross"] = summary["Tổng_Gross"].shift(1)
+    summary["Prev_Số_đơn_hàng"] = summary["Số_đơn_hàng"].shift(1)
+
+    summary["Change Net%"] = np.where(
         summary["Prev_Tổng_Net"] > 0,
         (summary["Tổng_Net"] - summary["Prev_Tổng_Net"]) / summary["Prev_Tổng_Net"] * 100,
+        np.nan,
+    )
+
+    summary["Change Gross%"] = np.where(
+        summary["Prev_Tổng_Gross"] > 0,
+        (summary["Tổng_Gross"] - summary["Prev_Tổng_Gross"]) / summary["Prev_Tổng_Gross"] * 100,
+        np.nan,
+    )
+
+    summary["Change ĐH%"] = np.where(
+        summary["Prev_Số_đơn_hàng"] > 0,
+        (summary["Số_đơn_hàng"] - summary["Prev_Số_đơn_hàng"]) / summary["Prev_Số_đơn_hàng"] * 100,
+        np.nan,
+    )
+
+    summary["AOV"] = np.where(
+        summary["Số_đơn_hàng"] > 0,
+        summary["Tổng_Net"] / summary["Số_đơn_hàng"],
         np.nan,
     )
 
@@ -374,16 +395,31 @@ summary, reg, store = build_tables(tmp, filter_signature)
 st.subheader("📊 Tổng hợp doanh thu")
 
 summary_show = summary.copy()
-for c in ["Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Prev_Tổng_Net"]:
+
+for c in ["Tổng_Gross", "Tổng_Net", "Số_đơn_hàng", "AOV"]:
     if c in summary_show.columns:
         summary_show[c] = summary_show[c].apply(fmt_int)
-for c in ["Tỷ_lệ_CK (%)", "%_So_sánh_Tổng_Net"]:
+
+for c in ["Tỷ_lệ_CK (%)", "Change Gross%", "Change Net%", "Change ĐH%"]:
     if c in summary_show.columns:
-        summary_show[c] = summary_show[c].apply(lambda v: fmt_pct(v, 2, with_sign=(c == "%_So_sánh_Tổng_Net")))
+        summary_show[c] = summary_show[c].apply(
+            lambda v: fmt_pct(v, 2, with_sign=(c != "Tỷ_lệ_CK (%)"))
+        )
 
 show_df(
-    summary_show[["Label", "Tổng_Gross", "Tổng_Net", "Số_KH", "Số_đơn_hàng", "Tỷ_lệ_CK (%)", "Prev_Tổng_Net", "%_So_sánh_Tổng_Net"]]
-    .rename(columns={"Label": "Kỳ"}),
+    summary_show[
+        [
+            "Label",
+            "Tổng_Gross",
+            "Tổng_Net",
+            "Số_đơn_hàng",
+            "AOV",
+            "Tỷ_lệ_CK (%)",
+            "Change Gross%",
+            "Change Net%",
+            "Change ĐH%",
+        ]
+    ].rename(columns={"Label": "Kỳ"}),
     title=None
 )
 
@@ -395,6 +431,15 @@ fig = px.line(
     title=f"Doanh thu theo {time_grain}",
 )
 st.plotly_chart(fig, use_container_width=True)
+
+fig2 = px.line(
+     summary,
+     x="Time",
+     y="AOV",
+     markers=True,
+     title="AOV theo thời gian"
+)
+st.plotly_chart(fig2, use_container_width=True)
 
 # =====================================================
 # REGION (chọn kỳ)
