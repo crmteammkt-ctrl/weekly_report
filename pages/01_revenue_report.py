@@ -591,7 +591,7 @@ else:
             if c in out.columns:
                out[c] = out[c].apply(lambda v: fmt_pct(v, 2, with_sign=True))
 
-    return out
+        return out
 
     colA, colB = st.columns(2)
     with colA:
